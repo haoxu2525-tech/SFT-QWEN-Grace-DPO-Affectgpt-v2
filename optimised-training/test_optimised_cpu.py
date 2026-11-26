@@ -1,0 +1,335 @@
+"""CPU checks of the optimised method (torch + transformers, no 7B model, no GPU).
+
+    python test_optimised_cpu.py
+    OMNI_TOKENIZER=/path/to/Qwen2.5-Omni-7B python test_optimised_cpu.py   # also the real tokenizer checks
+
+Checked:
+  - segments: word diff of label / description answers, contradicted-cue spans;
+  - token weights follow the official tokenisation, one EOS weight, differing words weighted 1;
+  - segment_forward equals the official concatenated_forward + _get_batch_logps sums when every
+    weight is 1, and the weighted sums otherwise (official functions loaded from vendor/dpo);
+  - segment_loss with shared_weight 1 and pair weight 1 equals GRACE's loss of setting C
+    (length_normalize: true); pair weights scale each pair's loss;
+  - the post-training preference probability equals the loss's sigma(beta*h);
+  - length penalty (linear / log / none);
+  - ranking pairs: relative pairs without an absolutely bad answer, GT fallback, eligibility,
+    H margin floor, cap, clip-normalised weights, full build() on a synthetic round.
+"""
+import ast
+import json
+import math
+import os
+from pathlib import Path
+import tempfile
+import types
+import unittest
+
+import torch
+
+import optimised_interface as oi
+import ranking
+import segments
+import build_pairs as bp
+from grace_loss import GraceLossConfig, grace_loss
+
+
+def official_functions():
+    """_get_batch_logps / concatenated_inputs / pad_to_length from the official DPO source,
+    executed on their own (the full module needs wandb/omegaconf, which the CPU check lacks)."""
+    dpo = oi.base.DPO
+    import typing
+    ns = {"torch": torch, "Dict": typing.Dict, "Union": typing.Union, "List": typing.List}
+    for file, names in ((dpo / "utils.py", {"pad_to_length"}),
+                        (dpo / "trainers.py", {"_get_batch_logps", "concatenated_inputs"})):
+        tree = ast.parse(file.read_text(encoding="utf-8"))
+        body = [n for n in tree.body if isinstance(n, ast.FunctionDef) and n.name in names]
+        if len(body) != len(names):
+            raise RuntimeError(f"official functions missing in {file}")
+        exec(compile(ast.Module(body=body, type_ignores=[]), str(file), "exec"), ns)
+    return types.SimpleNamespace(**{k: ns[k] for k in ("pad_to_length", "_get_batch_logps", "concatenated_inputs")})
+
+
+class TinyLM(torch.nn.Module):
+    """Stand-in model with OmniModel's call shape (media_context + forward(ids, attention_mask))."""
+    def __init__(self, vocab=50):
+        super().__init__()
+        torch.manual_seed(0)
+        self.emb, self.out, self.media = torch.nn.Embedding(vocab, 16), torch.nn.Linear(16, vocab), None
+
+    def media_context(self, media):
+        import contextlib
+
+        @contextlib.contextmanager
+        def ctx():
+            self.media = media
+            yield
+            self.media = None
+        return ctx()
+
+    def forward(self, input_ids, attention_mask):
+        assert self.media is not None and len(self.media) == input_ids.shape[0]
+        return types.SimpleNamespace(logits=self.out(torch.tanh(self.emb(input_ids))))
+
+
+def fake_batch(off, n=3, seed=1):
+    g = torch.Generator().manual_seed(seed)
+    batch = {"media": [{}] * n, "segw_chosen": [], "segw_rejected": []}
+    for side in ("chosen", "rejected"):
+        ids, labels = [], []
+        for _ in range(n):
+            p, r = int(torch.randint(3, 6, (1,), generator=g)), int(torch.randint(2, 7, (1,), generator=g))
+            seq = torch.randint(0, 50, (p + r,), generator=g).tolist()
+            ids.append(seq)
+            labels.append([-100] * p + seq[p:])
+            batch[f"segw_{side}"].append([float(torch.rand(1, generator=g)) for _ in range(r)])
+        L = max(map(len, ids))
+        batch[f"{side}_input_ids"] = torch.tensor([s + [0] * (L - len(s)) for s in ids])
+        batch[f"{side}_attention_mask"] = torch.tensor([[1] * len(s) + [0] * (L - len(s)) for s in ids])
+        batch[f"{side}_labels"] = torch.tensor([s + [-100] * (L - len(s)) for s in labels])
+    return batch
+
+
+class Segments(unittest.TestCase):
+    def test_label_answers_differ_only_in_labels(self):
+        a = "The character's emotional state is happy, excited."
+        b = "The character's emotional state is sad, angry."
+        sa, sb = segments.diff_spans(a, b)
+        self.assertEqual([a[s:e] for s, e in sa], ["happy,", "excited."])
+        self.assertEqual([b[s:e] for s, e in sb], ["sad,", "angry."])
+
+    def test_shared_label_and_case_punctuation(self):
+        a = "Emotional state: Happy, relaxed"
+        b = "emotional state: happy. tense"
+        sa, sb = segments.diff_spans(a, b)
+        self.assertEqual([a[s:e] for s, e in sa], ["relaxed"])
+        self.assertEqual([b[s:e] for s, e in sb], ["tense"])
+
+    def test_contradicted_cue_spans(self):
+        text = "He is frowning and Frowning again while smiling."
+        spans = segments.cue_spans(text, ["frowning", ""])
+        self.assertEqual([text[s:e].lower() for s, e in spans], ["frowning", "frowning"])
+        sc, sr = segments.pair_spans("He smiles.", text, ["smiling"])
+        self.assertIn((text.index("smiling"), text.index("smiling") + 7), sr)
+
+    def test_token_weights_with_offsets(self):
+        class Tok:  # whitespace tokenizer with offsets, enough to test the mapping
+            def __call__(self, text, add_special_tokens=False, return_offsets_mapping=False):
+                spans = [(m.start(), m.end()) for m in segments.WORD.finditer(text)]
+                out = {"input_ids": [hash(text[s:e]) % 1000 for s, e in spans]}
+                if return_offsets_mapping:
+                    out["offset_mapping"] = spans
+                return out
+        text = "state is happy now"
+        w = segments.token_weights(Tok(), text, [(9, 14)], 0.2)
+        self.assertEqual(w, [0.2, 0.2, 1.0, 0.2, 0.2])   # last = EOS
+        with self.assertRaises(ValueError):
+            segments.token_weights(Tok(), text, [], 1.5)
+
+    @unittest.skipUnless(os.environ.get("OMNI_TOKENIZER"), "set OMNI_TOKENIZER to a Qwen2.5-Omni tokenizer folder")
+    def test_real_tokenizer(self):
+        from transformers import AutoTokenizer
+        tok = AutoTokenizer.from_pretrained(os.environ["OMNI_TOKENIZER"])
+        a = "The character's emotional state is happy, excited, relieved."
+        b = "The character's emotional state is anxious, excited, nervous."
+        sa, sb = segments.pair_spans(a, b)
+        for text, spans in ((a, sa), (b, sb)):
+            w = segments.token_weights(tok, text, spans, 0.2)
+            ids = tok(text, add_special_tokens=False)["input_ids"]
+            self.assertEqual(len(w), len(ids) + 1)
+            heavy = tok.decode([i for i, x in zip(ids, w) if x == 1.0])
+            light = tok.decode([i for i, x in zip(ids, w) if x < 1.0])
+            self.assertNotIn("excited", heavy)
+            self.assertIn("excited", light)
+            self.assertIn("emotional state", light)
+        heavy_a = tok.decode([i for i, x in zip(tok(a, add_special_tokens=False)["input_ids"],
+                                                 segments.token_weights(tok, a, sa, 0.2)) if x == 1.0])
+        self.assertIn("happy", heavy_a)
+        self.assertIn("relieved", heavy_a)
+
+
+class Forward(unittest.TestCase):
+    def setUp(self):
+        self.off = official_functions()
+        self.trainers = types.SimpleNamespace(concatenated_inputs=self.off.concatenated_inputs)
+        self.model = TinyLM()
+
+    def official_sums(self, batch):
+        cat = self.off.concatenated_inputs(batch)
+        with self.model.media_context(batch["media"] + batch["media"]):
+            logits = self.model(cat["concatenated_input_ids"],
+                                attention_mask=cat["concatenated_attention_mask"]).logits.to(torch.float32)
+        lp = self.off._get_batch_logps(logits, cat["concatenated_labels"], average_log_prob=False)
+        n = batch["chosen_input_ids"].shape[0]
+        return lp[:n], lp[n:]
+
+    def test_unit_weights_equal_official(self):
+        batch = fake_batch(self.off)
+        for side in ("chosen", "rejected"):
+            batch[f"segw_{side}"] = [[1.0] * len(w) for w in batch[f"segw_{side}"]]
+        c, r, wc, wr = oi.segment_forward(self.trainers, self.model, batch)
+        oc, orr = self.official_sums(batch)
+        torch.testing.assert_close(c, oc)
+        torch.testing.assert_close(r, orr)
+        self.assertEqual(wc.tolist(), [float(len(w)) for w in batch["segw_chosen"]])
+
+    def test_weighted_sums(self):
+        batch = fake_batch(self.off, seed=3)
+        c, r, wc, wr = oi.segment_forward(self.trainers, self.model, batch)
+        cat = self.off.concatenated_inputs(batch)
+        with self.model.media_context(batch["media"] * 2):
+            logits = self.model(cat["concatenated_input_ids"], cat["concatenated_attention_mask"]).logits.float()
+        labels = cat["concatenated_labels"]
+        expect = []
+        for i, w in enumerate(batch["segw_chosen"] + batch["segw_rejected"]):
+            pos = [t for t in range(1, labels.shape[1]) if labels[i, t] != -100]
+            lps = [torch.log_softmax(logits[i, t - 1], -1)[labels[i, t]] for t in pos]
+            expect.append(sum(float(x) * wt for x, wt in zip(lps, w)))
+        torch.testing.assert_close(torch.cat([c, r]), torch.tensor(expect), rtol=1e-5, atol=1e-5)
+        torch.testing.assert_close(wc, torch.tensor([sum(w) for w in batch["segw_chosen"]]))
+
+    def test_misaligned_weights_fail(self):
+        batch = fake_batch(self.off)
+        batch["segw_chosen"][0] = batch["segw_chosen"][0] + [1.0]
+        with self.assertRaises(ValueError):
+            oi.segment_forward(self.trainers, self.model, batch)
+
+
+class Loss(unittest.TestCase):
+    def setUp(self):
+        g = torch.Generator().manual_seed(7)
+        self.n = 6
+        self.pc, self.pr = -torch.rand(self.n, generator=g) * 40, -torch.rand(self.n, generator=g) * 40
+        self.rc, self.rr = self.pc + torch.randn(self.n, generator=g), self.pr + torch.randn(self.n, generator=g)
+        self.tc = torch.randint(5, 40, (self.n,), generator=g)
+        self.tr = torch.randint(5, 40, (self.n,), generator=g)
+        self.margin = torch.rand(self.n, generator=g)
+        self.score = torch.rand(self.n, generator=g) + 0.5
+        self.cfg = GraceLossConfig(beta=2.0, length_normalize=True, nll_weight=0.05, nll_min_chosen_score=0.8)
+
+    def test_unit_weights_equal_setting_c(self):
+        ref, ref_stats = grace_loss(self.pc, self.pr, self.rc, self.rr, self.margin, self.tc, self.cfg,
+                                    rejected_tokens=self.tr, chosen_score=self.score)
+        got, stats, _ = oi.segment_loss(self.pc, self.pr, self.rc, self.rr, self.tc.float(), self.tr.float(),
+                                        self.margin, self.score, torch.ones(self.n), self.cfg)
+        torch.testing.assert_close(got, ref)
+        torch.testing.assert_close(stats["pref_prob"], ref_stats["pref_prob"])
+
+    def test_pair_weight_scales_each_pair(self):
+        pw = torch.linspace(0.5, 2.0, self.n)
+        one, _, _ = oi.segment_loss(self.pc, self.pr, self.rc, self.rr, self.tc.float(), self.tr.float(),
+                                    self.margin, self.score, torch.ones(self.n), self.cfg)
+        got, _, _ = oi.segment_loss(self.pc, self.pr, self.rc, self.rr, self.tc.float(), self.tr.float(),
+                                    self.margin, self.score, pw, self.cfg)
+        torch.testing.assert_close(got, one * pw)
+
+    def test_gradient_only_through_policy(self):
+        pc, pr = self.pc.clone().requires_grad_(), self.pr.clone().requires_grad_()
+        losses, _, _ = oi.segment_loss(pc, pr, self.rc, self.rr, self.tc.float() * 0.3, self.tr.float() * 0.3,
+                                       self.margin, self.score, torch.ones(self.n), self.cfg)
+        losses.sum().backward()
+        self.assertTrue(torch.isfinite(pc.grad).all() and pr.grad.abs().sum() > 0)
+
+    def test_post_training_probability_matches_loss(self):
+        wc, wr = self.tc.float() * 0.4, self.tr.float() * 0.7
+        _, stats, _ = oi.segment_loss(self.pc, self.pr, self.rc, self.rr, wc, wr, self.margin, self.score,
+                                      torch.ones(self.n), self.cfg)
+        pol = {str(i): [float(self.pc[i]), float(self.pr[i]), float(wc[i]), float(wr[i])] for i in range(self.n)}
+        ref = {str(i): [float(self.rc[i]), float(self.rr[i]), float(wc[i]), float(wr[i])] for i in range(self.n)}
+        pref = oi.preference_probabilities(pol, ref, self.cfg.beta)
+        for i in range(self.n):
+            self.assertAlmostEqual(pref[str(i)], float(stats["pref_prob"][i]), places=5)
+
+
+def rec(uid, r_label, n_contradicted=0, r_ground=None, response=None, n_labels=3, cues=()):
+    return {"uid": uid, "response": response or f"answer {uid}", "r_label": r_label, "hit": r_label > 0,
+            "n_labels": n_labels, "n_gt_labels": 3, "r_ground": r_ground, "n_contradicted": n_contradicted,
+            "contradicted_cues": list(cues), "n_claims": 0, "n_affective": 0, "n_affective_supported": 0}
+
+
+ORIGINAL = {k: f"<{k}>" for k in bp.ORIGINAL_FIELDS}
+ORIGINAL.update(id="clip1", ground_truth_answer="GT answer", label_type="ovlabel")
+CFG = {"label_good": 0.5, "label_bad": 0.2, "ground_good": 0.6, "ground_default": 0.5, "gt_ground_assumed": 1.0,
+       "alpha": 0.5, "min_margin": 0.2, "h_min_margin": 0.3, "max_pairs_per_clip": 4,
+       "clip_normalize": True, "length_penalty": "linear", "anchor_ratio": 0, "replay_max_fraction": 0.1}
+
+
+class Ranking(unittest.TestCase):
+    def pairs(self, recs, **over):
+        return ranking.rank_pairs(ORIGINAL, recs, dict(CFG, **over), bp.reward, bp.make_row)
+
+    def test_length_penalty(self):
+        self.assertEqual(ranking.length_penalty(4, 2, "linear"), 0.5)
+        self.assertEqual(ranking.length_penalty(2, 4, "linear"), 1.0)
+        self.assertAlmostEqual(ranking.length_penalty(4, 2, "log"), math.log(2) / math.log(4))
+        self.assertEqual(ranking.length_penalty(9, 1, "none"), 1.0)
+        self.assertEqual(ranking.length_penalty(3, 0, "linear"), 1.0)
+
+    def test_relative_pair_without_bad_answer(self):
+        # GRACE: no answer <= 0.2, so no pair. Ranking: 0.9 vs 0.6 is a pair (gap 0.3).
+        rows = self.pairs([rec("clip1:0", 0.9), rec("clip1:1", 0.6), rec("clip1:2", 0.75)])
+        self.assertEqual([(r["chosen_uid"], r["rejected_uid"], r["type"]) for r in rows],
+                         [("clip1:0", "clip1:1", "R")])
+        self.assertEqual(rows[0]["id"], "clip1#0>1")
+        self.assertEqual(bp.select_pairs(ORIGINAL, [rec("clip1:0", 0.9), rec("clip1:1", 0.6)],
+                                         dict(CFG, type_priority=["H", "L", "S"], use_spurious=True,
+                                              max_pairs_per_clip=2)), [])
+
+    def test_gt_fallback_and_types(self):
+        rows = self.pairs([rec("clip1:0", 0.4), rec("clip1:1", 0.1)])
+        got = {(r["chosen_uid"], r["rejected_uid"], r["type"]) for r in rows}
+        self.assertEqual(got, {("gt", "clip1:0", "R"), ("gt", "clip1:1", "L"), ("clip1:0", "clip1:1", "L")})
+        self.assertEqual(rows[0]["chosen"], "GT answer")
+
+    def test_hallucinated_answer_never_chosen_and_margin_floor(self):
+        rows = self.pairs([rec("clip1:0", 0.7, r_ground=1.0), rec("clip1:1", 0.8, n_contradicted=1,
+                                                                   r_ground=0.5, cues=["smiling"])])
+        self.assertEqual(len(rows), 1)
+        self.assertEqual((rows[0]["chosen_uid"], rows[0]["type"]), ("clip1:0", "H"))
+        self.assertAlmostEqual(rows[0]["margin"], 0.3)
+        self.assertEqual(rows[0]["contradicted_cues"], ["smiling"])
+
+    def test_cap_and_identical_text(self):
+        recs = [rec(f"clip1:{k}", s) for k, s in enumerate([1.0, 0.75, 0.5, 0.25, 0.0])]
+        recs.append(rec("clip1:5", 0.0, response="answer clip1:0"))
+        rows = self.pairs(recs, max_pairs_per_clip=3)
+        self.assertEqual(len(rows), 3)
+        self.assertEqual(rows[0]["margin"], 1.0)
+        self.assertTrue(all(r["clip_pairs"] == 3 for r in rows))
+        self.assertFalse(any(r["chosen"] == r["rejected"] for r in rows))
+
+    def test_pair_weights(self):
+        rows = [{"clip_pairs": 1}, {"clip_pairs": 4}, {"clip_pairs": 4}, {"clip_pairs": 4}, {"clip_pairs": 4}]
+        ranking.assign_pair_weights(rows, True)
+        self.assertAlmostEqual(sum(r["pair_weight"] for r in rows) / len(rows), 1.0)
+        self.assertAlmostEqual(rows[0]["pair_weight"], 4 * rows[1]["pair_weight"])
+        ranking.assign_pair_weights(rows, False)
+        self.assertEqual({r["pair_weight"] for r in rows}, {1.0})
+
+    def test_build_synthetic_round(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            d = Path(tmp)
+            cands, labels = [], []
+            for c in range(6):
+                row = dict(ORIGINAL, id=f"c{c}", candidates=[f"ans {c} {k}" for k in range(4)])
+                cands.append(row)
+                for k in range(4):
+                    n_pred = 6 if k == 0 else 2
+                    labels.append({"uid": f"c{c}:{k}", "r_label": [0.9, 0.6, 0.55, 0.3][k], "hit": True,
+                                   "labels": [f"l{i}" for i in range(n_pred)], "gt_labels": ["a", "b", "c"]})
+            bp.write_jsonl(d / "candidates.jsonl", cands)
+            bp.write_jsonl(d / "labels.jsonl", labels)
+            bp.write_jsonl(d / "claims.jsonl", [])
+            cfg = dict(CFG, verify_cache=str(d / "verify.jsonl"))
+            summary = ranking.build(d, cfg, batch_size=4, seed=1, bp=bp)
+            pairs = bp.read_jsonl(d / "pairs.jsonl")
+            self.assertEqual(len(pairs) % 4, 0)
+            self.assertEqual(summary["length_penalty"]["penalised_answers"], 6)
+            # answer 0 (r_label 0.9, 6 labels vs 3) is penalised to 0.45, so answer 1 (0.6) ranks first
+            self.assertTrue(all(p["chosen_uid"].endswith(":1") or p["chosen_uid"].endswith(":2") for p in pairs))
+            self.assertAlmostEqual(sum(p["pair_weight"] for p in pairs) / len(pairs), 1.0)
+            with self.assertRaises(ValueError):
+                ranking.build(d, dict(cfg, anchor_ratio=0.2), batch_size=4, seed=1, bp=bp)
+
+
+if __name__ == "__main__":
+    unittest.main(verbosity=2)

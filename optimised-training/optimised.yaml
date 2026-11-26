@@ -1,0 +1,76 @@
+# Optimised GRACE run. Everything not under `segment:` or marked NEW is setting C of the GRACE
+# ablations (anchor 0, warm-up 10%, per-token log-probs, beta 2), which this method is compared with.
+# Values marked BASELINE stay equal to the Standard DPO / AffectGPT protocol.
+
+paths:
+  runtime: /workspace/grace-runtime
+  dataset_root: /workspace/dataset             # BASELINE: original AffectGPT dataset root
+  snapshot: /workspace/hf-cache/models--Qwen--Qwen2.5-Omni-7B/snapshots/ae9e1690543ffd5c0221dc27f79834d0294cba00
+  epoch30_checkpoint: /workspace/grace/vendor/standard-dpo/vendor/sft/checkpoints/sft-epochs-30-60/checkpoint_000030_loss_0.737.pth
+  baseline_pairs: /workspace/grace/vendor/standard-dpo/qwen3.8omniflash annotation   # BASELINE clip IDs / questions
+  baseline_eval_pairs: /workspace/grace-work/training-monitor.jsonl                   # the same 16 rows as GRACE
+  work_dir: /workspace/grace-work/optimised
+  model_cache: /workspace/hf-cache
+
+seed: 0                    # same clip order as GRACE: round r uses the same 2,000 clips
+rounds: 10
+clips_per_round: 2000
+k: 4
+
+sampling:
+  processes: 2
+  threads_per_process: 4
+  remotes: []
+
+train:
+  beta: 2.0                # per-token scale (as C)
+  lr: 5.0e-6               # BASELINE
+  warmup_ratio: 0.1        # as C
+  batch_size: 8            # BASELINE
+  gradient_accumulation_steps: 8   # BASELINE
+  eval_batch_size: 1       # BASELINE
+  n_eval_examples: 16      # BASELINE
+  max_length: 4096         # BASELINE (fails instead of truncating)
+  reference: precomputed
+  keep_full_policy: false
+
+loss:                      # GRACE loss, unchanged code, applied to weighted per-token means
+  label_smoothing: 0.0
+  length_normalize: true   # required: the optimised loss is always a (weighted) per-token mean
+  use_quality_weight: true
+  eta: 4.0
+  c: 0.0
+  gamma: 1.0
+  nll_weight: 0.05         # NLL on the chosen answer, weighted like the loss (mostly its differing segments)
+  nll_min_chosen_score: median
+  normalize_weights: true
+  ema_decay: 0.98
+
+segment:                   # NEW, change 1: claim-level (segment-weighted) DPO
+  shared_weight: 0.2       # weight of tokens both answers share; differing / contradicted-cue tokens = 1.
+                           # 0.2 = RLHF-V DDPO gamma 5; 1.0 = setting C exactly
+
+pairs:
+  verify_cache: /workspace/grace-work/verify-cache.jsonl   # shared with GRACE (verdicts are per clip and cue)
+  label_good: 0.5
+  label_bad: 0.2           # now only labels a pair's type (L); it no longer decides whether a pair exists
+  ground_good: 0.6
+  ground_default: 0.5
+  gt_ground_assumed: 1.0
+  alpha: 0.5               # R = r_label' + alpha * r_ground
+  min_margin: 0.2          # NEW meaning, change 2: smallest reward gap for a ranked pair
+  h_min_margin: 0.3
+  max_pairs_per_clip: 2    # NEW, change 2: largest-gap pairs kept per clip (4 gives the same clip coverage
+                           # on C round 1 at ~1.8x the pairs: 6,128 vs 3,488)
+  clip_normalize: true     # NEW, change 2: pair weight 1/(pairs of its clip), mean 1
+  length_penalty: linear   # NEW, change 4: AffectGPT-R1 P2 (n_gt/n_pred when n_pred > n_gt); log = P3; none = off
+  anchor_ratio: 0          # as C: no baseline anchor pairs
+  replay_max_fraction: 0.1
+
+verify:
+  support: 0.7
+  contradict: 0.15
+  fps: 2.0
+  max_frames: 24
+  max_pixels: 200704
+  claims_per_batch: 4

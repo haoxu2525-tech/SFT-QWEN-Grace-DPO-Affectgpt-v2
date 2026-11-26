@@ -1,0 +1,3 @@
+[submodule "vendor/grace"]
+	path = vendor/grace
+	url = https://github.com/haoxu2525-tech/SFT-Qwen2.5Omni7B-GRACE-DPO-AffectGPT.git
