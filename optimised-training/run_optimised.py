@@ -104,6 +104,8 @@ def main():
     ap.add_argument("--from", dest="source", type=Path)
     args = ap.parse_args()
     cfg = rg.load(args.config)
+    if cfg["loss"].get("use_quality_weight") and cfg["pairs"].get("margin_weighting"):
+        raise SystemExit("Weight the gap once: loss.use_quality_weight (sigmoid) or pairs.margin_weighting (linear)")
     rg.stage_pairs, rg.stage_train = stage_pairs, stage_train   # the two replaced stages
     if args.command == "round":
         rg.do_round(cfg, args.round)

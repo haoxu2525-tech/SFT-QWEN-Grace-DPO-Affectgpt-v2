@@ -343,6 +343,18 @@ class Ranking(unittest.TestCase):
         ranking.assign_pair_weights(rows, False, False)
         self.assertEqual({r["pair_weight"] for r in rows}, {1.0})
 
+    def test_default_config_weights_gap_once(self):
+        import yaml
+        cfg = yaml.safe_load((Path(__file__).parent / "optimised.yaml").read_text(encoding="utf-8"))
+        self.assertTrue(cfg["loss"]["use_quality_weight"])
+        self.assertFalse(cfg["pairs"]["margin_weighting"])
+        rows = [{"margin": 0.4, "clip_pairs": 2}, {"margin": 0.9, "clip_pairs": 2}, {"margin": 1.2, "clip_pairs": 1}]
+        ranking.assign_pair_weights(rows, True, margin_weighting=False)
+        self.assertEqual(rows[0]["pair_weight"], rows[1]["pair_weight"])        # gap not in the pair weight
+        self.assertAlmostEqual(rows[2]["pair_weight"], 2 * rows[0]["pair_weight"])
+        w_q = [1 / (1 + math.exp(-4 * g)) for g in (0.3, 0.8, 1.5)]               # GRACE quality weight, eta 4
+        self.assertEqual([round(x, 2) for x in w_q], [0.77, 0.96, 1.0])
+
     def test_build_synthetic_round(self):
         with tempfile.TemporaryDirectory() as tmp:
             d = Path(tmp)

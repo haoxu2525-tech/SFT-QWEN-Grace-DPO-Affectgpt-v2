@@ -37,8 +37,8 @@ train:
 loss:                      # GRACE loss, unchanged code, applied to weighted per-token means
   label_smoothing: 0.0
   length_normalize: true   # required: the optimised loss is always a (weighted) per-token mean
-  use_quality_weight: false # the gap weighting is pairs.margin_weighting (linear in the gap); GRACE's
-                           # sigmoid(eta * gap) weight would weight by the gap a second time
+  use_quality_weight: true # GRACE's gap weight sigmoid(eta * gap - c): 0.77 at gap 0.3, 0.96 at 0.8,
+                           # bounded, so large gaps (often GT vs a bad answer) cannot dominate
   eta: 4.0
   c: 0.0
   gamma: 1.0
@@ -63,7 +63,7 @@ pairs:
                            # (smaller gaps are mostly scoring noise); no h_min_margin floor
   max_pairs_per_clip: 2    # NEW, change 2: largest-gap pairs kept per clip (4 gives the same clip coverage
                            # on C round 1 at ~1.8x the pairs: 6,128 vs 3,488)
-  margin_weighting: true   # NEW, change 2: pair weight proportional to the reward gap
+  margin_weighting: false  # true = pair weight linear in the gap instead (then set use_quality_weight: false)
   clip_normalize: true     # NEW, change 2: times 1/(pairs of its clip); weights rescaled to mean 1
   length_penalty: symmetric  # NEW, change 4: label-count penalty min(n_pred, n_gt) / max(n_pred, n_gt), so
                            # over- and under-predicting are penalised alike (keeps chosen at the GT count).

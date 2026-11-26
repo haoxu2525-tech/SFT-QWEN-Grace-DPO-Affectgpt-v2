@@ -31,7 +31,8 @@ length penalty's target) still makes a pair; a chosen answer that drops below th
 count while the rejected one matches it does not. Pairs with an unknown count are kept.
 `none` turns the rule off.
 Each clip keeps its max_pairs_per_clip largest-gap pairs. Pair weight (mean 1 over the round):
-    margin_weighting: pair weight proportional to the reward gap (a 0.9 gap counts 3x a 0.3 gap);
+    margin_weighting: pair weight proportional to the reward gap (off by default: the gap is
+                      weighted by GRACE's bounded sigmoid(eta * gap) in the loss instead);
     clip_normalize:   times 1/(pairs of its clip), so a clip with many pairs does not count more.
 """
 import json

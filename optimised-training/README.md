@@ -24,16 +24,20 @@ an answer is the weighted per-token mean. GRACE's loss code then runs unchanged 
 and so does its chosen-NLL term, which now mostly pulls up the chosen answer's differing segments.
 With `shared_weight: 1` and every pair weight at 1, this is exactly setting C (checked on CPU).
 
-**2. Pairs from the within-clip ranking, weighted by the reward gap** (`ranking.py`).
+**2. Pairs from the within-clip ranking** (`ranking.py`).
 The K answers of a clip are ranked by R = r_label' + 0.5 r_ground. Every pair with a reward gap
 **strictly greater than 0.3** is a candidate; smaller gaps are mostly scoring noise. The 2 largest-gap
 pairs per clip are kept. Previously one of the answers had to be absolutely bad (r_label <= 0.2).
 As in GRACE, the chosen side never carries a contradicted cue, and the ground truth joins the ranking
 only if no answer reaches 0.5. The margin is always the real gap (GRACE's 0.3 floor for hallucination
 pairs is not used).
-Each pair's loss is weighted by **gap x 1/(pairs of its clip)**, rescaled to a mean of 1, so a 0.9 gap
-counts 3x a 0.3 gap. GRACE's own sigmoid gap weight (`loss.use_quality_weight`) is turned off so the
-gap is not weighted twice.
+Each pair's loss is weighted by **GRACE's sigmoid(4 x gap)** and by **1/(pairs of its clip)**. The
+clip weights are rescaled to a mean of 1, so a clip that gives two pairs counts as much as a clip that
+gives one. The sigmoid is bounded: 0.77 at a gap of 0.3, 0.96 at 0.8 and 0.998 at 1.5. A pair with a
+large gap, often the ground truth against a clearly wrong answer, therefore weighs about as much as
+a pair just above the threshold. The threshold decides which pairs exist, and the sigmoid only
+damps the ones near it. `pairs.margin_weighting: true` (with `loss.use_quality_weight: false`)
+weights linearly in the gap instead: a 0.9 gap then counts 3x a 0.3 gap.
 
 **4. Label-count penalty on the label reward, and a label-count rule for pairs** (`ranking.py`).
 - **Penalty.** r_label' = r_label x min(n_pred, n_gt) / max(n_pred, n_gt). It uses the number of
@@ -115,7 +119,7 @@ Outputs are the same as GRACE (`/workspace/grace-work/optimised/roundN/`), plus 
 
 ## Verification status
 
-`python test_optimised_cpu.py` passes (22 checks, set `OMNI_TOKENIZER` for the real-tokenizer
+`python test_optimised_cpu.py` passes (23 checks, set `OMNI_TOKENIZER` for the real-tokenizer
 check):
 - segment weights follow the official tokenisation, including the EOS token;
 - `segment_forward` equals the official `concatenated_forward` sums when every weight is 1, and the
@@ -123,7 +127,7 @@ check):
 - the loss equals setting C's GRACE loss when every weight is 1;
 - pair weights scale each pair's loss;
 - the post-training preference probability matches the loss;
-- the ranking rules (gap strictly above 0.3, real margins, gap x clip weights), the label-count penalty
+- the ranking rules (gap strictly above 0.3, real margins, clip weights, optional linear gap weights), the label-count penalty
   (symmetric / linear / log) and the closer-to-GT count rule
   behave as described;
 - a full `build()` runs on a synthetic round.
