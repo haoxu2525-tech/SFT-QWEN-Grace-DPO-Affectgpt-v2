@@ -263,6 +263,28 @@ class Ranking(unittest.TestCase):
         self.assertAlmostEqual(ranking.length_penalty(4, 2, "log"), math.log(2) / math.log(4))
         self.assertEqual(ranking.length_penalty(9, 1, "none"), 1.0)
         self.assertEqual(ranking.length_penalty(3, 0, "linear"), 1.0)
+        self.assertEqual(ranking.length_penalty(2, 4, "symmetric"), 0.5)
+        self.assertEqual(ranking.length_penalty(6, 3, "symmetric"), 0.5)
+        self.assertEqual(ranking.length_penalty(3, 3, "symmetric"), 1.0)
+
+    def test_label_count_rule(self):
+        gt3 = lambda n: {"n_pred": n, "n_gt": 3}
+        self.assertTrue(ranking.count_ok(gt3(3), gt3(5), "closer_to_gt"))    # rejected over-predicts
+        self.assertTrue(ranking.count_ok(gt3(4), gt3(1), "closer_to_gt"))
+        self.assertTrue(ranking.count_ok(gt3(2), gt3(4), "closer_to_gt"))    # equally far: kept
+        self.assertFalse(ranking.count_ok(gt3(1), gt3(3), "closer_to_gt"))   # would teach fewer labels
+        self.assertFalse(ranking.count_ok(gt3(6), gt3(3), "closer_to_gt"))   # would teach more labels
+        self.assertTrue(ranking.count_ok(gt3(1), {"n_pred": None, "n_gt": 3}, "closer_to_gt"))
+        self.assertTrue(ranking.count_ok(gt3(1), gt3(3), "none"))
+        with self.assertRaises(ValueError):
+            ranking.count_ok(gt3(1), gt3(3), "fewer")
+
+    def test_count_rule_in_ranking(self):
+        recs = [dict(rec("clip1:0", 0.9), n_pred=1, n_gt=3), dict(rec("clip1:1", 0.3), n_pred=3, n_gt=3),
+                dict(rec("clip1:2", 0.2), n_pred=5, n_gt=3)]
+        kept = {(r["chosen_uid"], r["rejected_uid"]) for r in self.pairs(recs, label_count_rule="closer_to_gt")}
+        self.assertEqual(kept, {("clip1:0", "clip1:2")})   # 1 label vs 3: dropped; 1 vs 5: equally far, kept
+        self.assertEqual(len(self.pairs(recs, label_count_rule="none")), 2)
 
     def test_relative_pair_without_bad_answer(self):
         # GRACE: no answer <= 0.2, so no pair. Ranking: 0.9 vs 0.55 is a pair (gap 0.35 > 0.3);

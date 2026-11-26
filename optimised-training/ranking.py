@@ -1,10 +1,13 @@
 """Changes 2 and 4 - pairs from the within-clip ranking, scored with a length-penalised label reward.
 
-Change 4 (reward). AffectGPT-R1's accuracy reward multiplies the emotion-wheel score by a
-length penalty when the answer predicts more labels than the ground truth:
-    r_label' = r_label * P,   P = 1                      if n_pred <= n_gt
-                              P = n_gt / n_pred           (linear, R1's P2)
-                              P = log n_gt / log n_pred   (log, R1's P3)
+Change 4 (reward). The emotion-wheel score is multiplied by a label-count penalty:
+    r_label' = r_label * P,   P = min(n_pred, n_gt) / max(n_pred, n_gt)   (symmetric, the default)
+AffectGPT-R1's own forms penalise only over-prediction (P = 1 if n_pred <= n_gt, else
+n_gt / n_pred = linear, R1's P2, or log n_gt / log n_pred = log, R1's P3). On setting C's
+round 1 that one-sided penalty, added to F1's own precision term, made the chosen side of
+ovlabel pairs average 2.94 labels against 3.37 for the ground truth: the pairs taught fewer
+labels, the Standard DPO shrink. The symmetric form keeps chosen at the ground-truth count
+(3.66 vs 3.70) while still penalising over-prediction.
 n_pred / n_gt are the distinct labels AffectGPT's extractor returned for the answer and the
 ground truth (labels.jsonl, written by GRACE's unchanged score_labels.py), so nothing is
 re-extracted. GRACE's r_label (per-sample wheel F1) is otherwise unchanged.
@@ -19,6 +22,14 @@ used: it would create pairs and weights from no gap). Kept from GRACE:
   - the chosen side never has a contradicted cue or low grounding (it must be "eligible");
   - if no answer reaches label_good, the original ground-truth answer joins the ranking as
     the top item (GRACE's GT fallback).
+Label-count rule (label_count_rule). A preference must not teach "predict fewer labels" (Standard
+DPO shrank answers from 3.26 to 2.91 labels and lost accuracy) nor "predict more". Counts only
+mean something relative to the ground truth, so with `closer_to_gt` a pair is kept only if the
+chosen answer's distinct label count is at least as close to the ground truth's as the rejected
+answer's: |n_chosen - n_gt| <= |n_rejected - n_gt|. A rejected answer that over-predicts (the
+length penalty's target) still makes a pair; a chosen answer that drops below the ground-truth
+count while the rejected one matches it does not. Pairs with an unknown count are kept.
+`none` turns the rule off.
 Each clip keeps its max_pairs_per_clip largest-gap pairs. Pair weight (mean 1 over the round):
     margin_weighting: pair weight proportional to the reward gap (a 0.9 gap counts 3x a 0.3 gap);
     clip_normalize:   times 1/(pairs of its clip), so a clip with many pairs does not count more.
@@ -30,7 +41,11 @@ import random
 
 
 def length_penalty(n_pred, n_gt, mode):
-    if mode in (None, "none") or not n_pred or not n_gt or n_pred <= n_gt:
+    if mode in (None, "none") or not n_pred or not n_gt:
+        return 1.0
+    if mode == "symmetric":   # both directions: min/max of the two counts
+        return min(n_pred, n_gt) / max(n_pred, n_gt)
+    if n_pred <= n_gt:
         return 1.0
     if mode == "linear":
         return n_gt / n_pred
@@ -46,10 +61,23 @@ def apply_length_penalty(clips, label_rows, mode):
         for rec in recs:
             row = lab[rec["uid"]]
             n_pred, n_gt = len(set(row.get("labels") or [])), len(set(row.get("gt_labels") or []))
+            rec["n_pred"], rec["n_gt"] = n_pred, n_gt   # distinct counts (penalty and count rule)
             rec["r_label_raw"] = rec["r_label"]
             rec["length_penalty"] = length_penalty(n_pred, n_gt, mode)
             rec["r_label"] = rec["r_label"] * rec["length_penalty"]
     return clips
+
+
+def count_ok(a, b, rule):
+    """label_count_rule: is the chosen answer's label count at least as close to the ground truth's?"""
+    if rule in (None, "none"):
+        return True
+    if rule != "closer_to_gt":
+        raise ValueError(f"Unknown label_count_rule: {rule}")
+    n_gt = a.get("n_gt") or b.get("n_gt")
+    if not n_gt or not a.get("n_pred") or not b.get("n_pred"):
+        return True
+    return abs(a["n_pred"] - n_gt) <= abs(b["n_pred"] - n_gt)
 
 
 def rank_pairs(original, recs, cfg, reward, make_row):
@@ -61,10 +89,11 @@ def rank_pairs(original, recs, cfg, reward, make_row):
         items.append(dict(rec, key=k, R=reward(rec, cfg), eligible=eligible, source="policy"))
     if not any(it["eligible"] and it["r_label"] >= cfg["label_good"] for it in items):
         gt_n = next((r["n_gt_labels"] for r in recs if r.get("n_gt_labels") is not None), None)
+        gt_d = next((r["n_gt"] for r in recs if r.get("n_gt")), None)
         items.append({"key": "gt", "uid": "gt", "response": original["ground_truth_answer"],
                       "R": 1.0 + cfg["alpha"] * cfg["gt_ground_assumed"], "r_label": 1.0,
                       "n_contradicted": 0, "contradicted_cues": [], "eligible": True,
-                      "source": "gt", "n_labels": gt_n})
+                      "source": "gt", "n_labels": gt_n, "n_pred": gt_d, "n_gt": gt_d})
     found = []
     for a in items:
         if not a["eligible"]:
@@ -81,6 +110,8 @@ def rank_pairs(original, recs, cfg, reward, make_row):
                 ptype = "R"   # ranked: neither absolutely bad nor hallucinated, just worse
             if margin <= cfg["min_margin"] + 1e-9:   # strictly greater; 1e-9 absorbs float error
                 continue
+            if not count_ok(a, b, cfg.get("label_count_rule", "none")):
+                continue
             found.append((margin, a, b, ptype))
     found.sort(key=lambda x: (-x[0], x[1]["key"], x[2]["key"]))
     found = found[: cfg["max_pairs_per_clip"]]
@@ -90,6 +121,7 @@ def rank_pairs(original, recs, cfg, reward, make_row):
             "chosen_source": a["source"], "chosen_uid": a["uid"], "rejected_uid": b["uid"],
             "r_chosen": a["R"], "r_rejected": b["R"],
             "chosen_n_labels": a.get("n_labels"), "rejected_n_labels": b.get("n_labels"),
+            "chosen_n_distinct": a.get("n_pred"), "rejected_n_distinct": b.get("n_pred"), "gt_n_distinct": a.get("n_gt") or b.get("n_gt"),
             "contradicted_cues": b.get("contradicted_cues", []), "clip_pairs": len(found)})
         row["id"] = f"{original['id']}#{a['key']}>{b['key']}"
         rows.append(row)
@@ -111,6 +143,26 @@ def assign_pair_weights(rows, clip_normalize, margin_weighting=True):
     for r, w in zip(rows, raw):
         r["pair_weight"] = w / mean
     return rows
+
+
+def count_vs_gt(pairs):
+    """Distinct label counts of chosen / rejected / ground truth, per question type (logging)."""
+    out = {}
+    for key in ("all", "ovlabel", "description"):
+        rows = [p for p in pairs if p.get("chosen_n_distinct") and p.get("rejected_n_distinct") and p.get("gt_n_distinct")
+                and key in ("all", p.get("label_type"))]
+        if not rows:
+            continue
+        n = len(rows)
+        c, r, g = ([p[f] for p in rows] for f in ("chosen_n_distinct", "rejected_n_distinct", "gt_n_distinct"))
+        out[key] = {"pairs": n, "chosen_mean": sum(c) / n, "rejected_mean": sum(r) / n, "gt_mean": sum(g) / n,
+                    "chosen_fewer": sum(x < y for x, y in zip(c, r)) / n,
+                    "chosen_more": sum(x > y for x, y in zip(c, r)) / n,
+                    "chosen_below_gt": sum(x < z for x, z in zip(c, g)) / n,
+                    "rejected_below_gt": sum(y < z for y, z in zip(r, g)) / n,
+                    "chosen_above_gt": sum(x > z for x, z in zip(c, g)) / n,
+                    "rejected_above_gt": sum(y > z for y, z in zip(r, g)) / n}
+    return out
 
 
 def build(round_dir, cfg, batch_size, seed, replay_rows=(), bp=None):
@@ -160,6 +212,8 @@ def build(round_dir, cfg, batch_size, seed, replay_rows=(), bp=None):
                "length_penalty": {"mode": cfg.get("length_penalty", "linear"),
                                   "penalised_answers": sum(x < 1 for x in pens), "answers": len(pens),
                                   "mean_factor": sum(pens) / len(pens) if pens else None},
-               "label_counts": bp.label_count_summary(pairs + replay)}
+               "label_count_rule": cfg.get("label_count_rule", "none"),
+               "label_counts": bp.label_count_summary(pairs + replay),
+               "label_counts_vs_gt": count_vs_gt(pairs)}
     (round_dir / "pairs-summary.json").write_text(json.dumps(summary, indent=2), encoding="utf-8")
     return summary

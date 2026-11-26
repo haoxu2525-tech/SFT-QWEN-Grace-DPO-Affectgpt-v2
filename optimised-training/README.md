@@ -35,41 +35,59 @@ Each pair's loss is weighted by **gap x 1/(pairs of its clip)**, rescaled to a m
 counts 3x a 0.3 gap. GRACE's own sigmoid gap weight (`loss.use_quality_weight`) is turned off so the
 gap is not weighted twice.
 
-**4. Length-penalised label reward** (`ranking.py`).
-AffectGPT-R1's penalty: r_label' = r_label x n_gt / n_pred when the answer predicts more distinct
-labels than the ground truth (`length_penalty: log` gives R1's P3, `none` turns it off). The label
-counts come from GRACE's unchanged `score_labels.py` output, so nothing is re-extracted.
+**4. Label-count penalty on the label reward, and a label-count rule for pairs** (`ranking.py`).
+- **Penalty.** r_label' = r_label x min(n_pred, n_gt) / max(n_pred, n_gt). It uses the number of
+  distinct labels in the answer and in the ground truth, from GRACE's unchanged `score_labels.py`
+  output, so nothing is re-extracted. Over- and under-predicting are penalised alike.
+  AffectGPT-R1's one-sided form (`length_penalty: linear`, R1's P2; `log` = P3) only penalises
+  over-prediction. Added to F1's own precision term, it made the pairs teach fewer labels (table
+  below), so it is no longer the default.
+- **Rule** (`label_count_rule: closer_to_gt`). A pair is kept only if the chosen answer's label count
+  is at least as close to the ground truth's as the rejected answer's:
+  |n_chosen − n_gt| <= |n_rejected − n_gt|. A pair never rewards dropping below, or rising above,
+  the ground-truth count.
+
+What the label counts should look like: the chosen side at the ground-truth count, and the rejected
+side off it in both directions, so no pair set teaches "fewer" or "more" on average.
+`pairs-summary.json` → `label_counts_vs_gt` reports this every round.
 
 ## Measured on setting C's round 1 (same 2,000 clips and answers, pairs stage only, no training)
 
-| | C (GRACE) | gap > 0.3, no penalty | gap > 0.3 + penalty (default) | gap >= 0.2 + penalty |
-|---|---|---|---|---|
-| pairs (cap 2 per clip) | 1,128 | 2,312 | 2,848 | 3,344 |
-| by type L / H / R | 564 / 561 / 3 S | 1,008 / 303 / 1,001 | 1,099 / 231 / 1,518 | 1,109 / 316 / 1,919 |
-| ovlabel clips with a pair | ~20% | 471 / 984 (48%) | 663 / 984 (67%) | 789 / 984 (80%) |
-| median reward gap | — | 0.58 | 0.60 | 0.53 |
-| pair weight range (mean 1) | — | 0.43–3.57 | 0.43–2.88 | 0.33–2.43 |
-| ovlabel pairs: chosen vs rejected label count | 3.62 vs 2.79 | 3.61 vs 3.32 | 2.90 vs 3.99 | 2.98 vs 4.00 |
-| ovlabel pairs where chosen has fewer labels | 23% | 34% | 65% | 64% |
+All columns use a gap > 0.3 and a cap of 2 pairs per clip. Counts are distinct labels in ovlabel pairs.
 
-Answers penalised by the length rule: 2,348 of 8,000 (mean factor 0.89). There are fewer H pairs
-than in C because C raised small hallucination gaps to 0.3; here a hallucination pair needs a real
-gap above 0.3.
+| | C (GRACE) | no penalty | R1 penalty (linear) | symmetric penalty | symmetric + count rule (default) |
+|---|---|---|---|---|---|
+| pairs | 1,128 | 2,312 | 2,848 | 3,200 | 3,152 |
+| by type L / H / R | 564 / 561 / 3 S | 1,008 / 303 / 1,001 | 1,099 / 231 / 1,518 | 1,389 / 121 / 1,690 | 1,333 / 120 / 1,699 |
+| ovlabel clips with a pair | ~20% | 471 / 984 (48%) | 663 / 984 (67%) | 765 / 984 (78%) | 761 / 984 (77%) |
+| chosen / rejected / GT mean count | — | 3.68 / 3.43 / 3.73 | 2.94 / 4.08 / 3.37 | 3.66 / 3.45 / 3.70 | 3.65 / 3.45 / 3.70 |
+| chosen below / above GT count | — | 33% / 30% | 33% / 8% | 12% / 9% | 11% / 9% |
+| rejected below / above GT count | — | 46% / 33% | 29% / 61% | 52% / 42% | 52% / 43% |
 
-**Risk to watch:** with the penalty, the chosen answer has fewer labels than the rejected one in 65%
-of ovlabel pairs. Standard DPO's label shrink (3.26 → 2.91 labels per answer) went with a lower
-benchmark score. The penalty only acts above the ground-truth count, but check the label count of
-the evaluated answers after round 1. `pairs-summary.json` reports these counts every round.
+- With R1's penalty, the chosen side sits 0.43 labels below the ground truth, and the rejected side
+  is mostly an over-prediction. Training on that set teaches "fewer labels". Standard DPO's label
+  shrink (3.26 → 2.91 labels per answer) went with a lower benchmark score.
+- With the symmetric penalty, the chosen side matches the ground-truth count in about 80% of pairs.
+  Rejected answers miss it in both directions.
+- The count rule removes the few remaining pairs whose chosen side is further from the ground truth
+  (48 pairs).
+- There are fewer H pairs because an H rejected answer needs a label score >= 0.5 after the penalty.
+  Also, C raised small hallucination gaps to 0.3, while here a hallucination pair needs a real gap
+  above 0.3.
+- Description pairs show the same pattern: with the default, chosen / rejected / GT average
+  3.61 / 3.08 / 3.66.
 
-**Cost:** about 2.5x C's pairs per round, so training takes about 2.5x as long (C: ~2 h per round on one
-A40, so about 5 h). Sampling, labels, claims and verification are unchanged.
+Still check the label count of the evaluated answers after round 1.
+
+**Cost:** about 2.8x C's pairs per round, so training takes about 2.8x as long (C: ~2 h per round on one
+A40, so about 5.5 h). Sampling, labels, claims and verification are unchanged.
 
 ## Files
 
 | File | |
 |---|---|
 | `run_optimised.py` | driver: `round`, `eval`, `status`, `reuse` (GRACE's driver with `pairs` and `train` replaced) |
-| `ranking.py` | changes 2 and 4: length-penalised reward, ranking pairs, pair weights |
+| `ranking.py` | changes 2 and 4: label-count penalty and rule, ranking pairs, pair weights |
 | `segments.py` | change 1: diff / contradicted-cue spans → per-token weights |
 | `optimised_interface.py` | `SegmentPairData`, `segment_forward`, `SegmentTrainer`, weighted reference and post-training passes |
 | `train_optimised.py` | GRACE's `train_grace.py` path with `SegmentTrainer` |
@@ -97,7 +115,7 @@ Outputs are the same as GRACE (`/workspace/grace-work/optimised/roundN/`), plus 
 
 ## Verification status
 
-`python test_optimised_cpu.py` passes (20 checks, set `OMNI_TOKENIZER` for the real-tokenizer
+`python test_optimised_cpu.py` passes (22 checks, set `OMNI_TOKENIZER` for the real-tokenizer
 check):
 - segment weights follow the official tokenisation, including the EOS token;
 - `segment_forward` equals the official `concatenated_forward` sums when every weight is 1, and the
@@ -105,7 +123,8 @@ check):
 - the loss equals setting C's GRACE loss when every weight is 1;
 - pair weights scale each pair's loss;
 - the post-training preference probability matches the loss;
-- the ranking rules (gap strictly above 0.3, real margins, gap x clip weights) and the length penalty
+- the ranking rules (gap strictly above 0.3, real margins, gap x clip weights), the label-count penalty
+  (symmetric / linear / log) and the closer-to-GT count rule
   behave as described;
 - a full `build()` runs on a synthetic round.
 

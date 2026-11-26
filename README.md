@@ -5,7 +5,7 @@ keeps the AffectGPT training data, the training path and the evaluation unchange
 
 | Folder | |
 |---|---|
-| [`optimised-training/`](optimised-training/README.md) | the v2 method: claim-level (segment-weighted) DPO, pairs from the within-clip ranking, AffectGPT-R1 length-penalised label reward |
+| [`optimised-training/`](optimised-training/README.md) | the v2 method: claim-level (segment-weighted) DPO, pairs from the within-clip ranking (reward gap > 0.3), label-count penalty and rule that keep the chosen side at the ground-truth label count |
 | `vendor/grace` | GRACE-DPO v1 ([`SFT-Qwen2.5Omni7B-GRACE-DPO-AffectGPT`](https://github.com/haoxu2525-tech/SFT-Qwen2.5Omni7B-GRACE-DPO-AffectGPT) @ `29605ad`), imported unchanged; it pins the Standard DPO baseline, the official DPO code, the SFT interface and AffectGPT |
 
 Why these changes: the v1 training curves (`vendor/grace/results/loss-curves`) show the following.

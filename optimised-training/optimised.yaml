@@ -65,7 +65,11 @@ pairs:
                            # on C round 1 at ~1.8x the pairs: 6,128 vs 3,488)
   margin_weighting: true   # NEW, change 2: pair weight proportional to the reward gap
   clip_normalize: true     # NEW, change 2: times 1/(pairs of its clip); weights rescaled to mean 1
-  length_penalty: linear   # NEW, change 4: AffectGPT-R1 P2 (n_gt/n_pred when n_pred > n_gt); log = P3; none = off
+  length_penalty: symmetric  # NEW, change 4: label-count penalty min(n_pred, n_gt) / max(n_pred, n_gt), so
+                           # over- and under-predicting are penalised alike (keeps chosen at the GT count).
+                           # linear = AffectGPT-R1 P2 (only n_pred > n_gt: n_gt/n_pred); log = P3; none = off.
+                           # linear made chosen answers 2.94 labels vs GT 3.37 on C round 1 (shrink risk)
+  label_count_rule: closer_to_gt   # NEW: keep a pair only if |n_chosen - n_gt| <= |n_rejected - n_gt|; none = off
   anchor_ratio: 0          # as C: no baseline anchor pairs
   replay_max_fraction: 0.1
 
