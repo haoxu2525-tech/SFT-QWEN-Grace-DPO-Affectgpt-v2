@@ -36,10 +36,17 @@ base = gi.base
 
 class SegmentPairData(gi.GracePairData):
     """GRACE's PairData unchanged; adds `segw_chosen` / `segw_rejected` (one weight per
-    supervised response token) and `pair_weight` to each item."""
+    supervised response token, shared tokens weighted by the row's `shared_weight`) and
+    `pair_weight` to each item."""
     def __init__(self, *args, shared_weight, **kwargs):
         super().__init__(*args, **kwargs)
         self.shared_weight = float(shared_weight)
+
+    def row_shared_weight(self, row):
+        """The pair's own shared-token weight (1.0 for GRACE-method description pairs, i.e.
+        setting C's plain per-token mean), else the run's segment.shared_weight."""
+        w = row.get("shared_weight")
+        return self.shared_weight if w is None else float(w)
 
     def tokenize(self, prompt, chosen, rejected, truncation_mode, tokenizer, max_length, max_prompt_length):
         item = super().tokenize(prompt, chosen, rejected, truncation_mode, tokenizer,
@@ -47,7 +54,7 @@ class SegmentPairData(gi.GracePairData):
         row = self.meta[json.loads(prompt)["id"]]
         spans_c, spans_r = pair_spans(chosen, rejected, row.get("contradicted_cues"))
         for side, text, spans in (("chosen", chosen, spans_c), ("rejected", rejected, spans_r)):
-            w = token_weights(tokenizer, text, spans, self.shared_weight)
+            w = token_weights(tokenizer, text, spans, self.row_shared_weight(row))
             if len(w) != item["length_info"][f"{side}_after"]:
                 raise ValueError(f"{row['id']}: segment weights do not align with the {side} tokens")
             if sum(w) <= 0:

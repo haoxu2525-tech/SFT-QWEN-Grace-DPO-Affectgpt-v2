@@ -381,5 +381,90 @@ class Ranking(unittest.TestCase):
                 ranking.build(d, dict(cfg, anchor_ratio=0.2), batch_size=4, seed=1, bp=bp)
 
 
+class PerTypeMethod(unittest.TestCase):
+    """ovlabel clips: ranking pairs, count penalty, segment weights; description clips: GRACE's
+    own pairing (setting C), raw r_label, every token weighted 1; ovlabel clips get k_ovlabel answers."""
+
+    def round_dir(self, d):
+        cands, labels, claims = [], [], []
+        for c in range(4):
+            ltype = "ovlabel" if c % 2 == 0 else "description"
+            n = 8 if ltype == "ovlabel" else 4
+            cands.append(dict(ORIGINAL, id=f"c{c}", label_type=ltype, candidates=[f"ans {c} {k}" for k in range(n)]))
+            for k in range(n):
+                score = [0.9, 0.55, 0.5, 0.1, 0.85, 0.5, 0.45, 0.3][k]
+                labels.append({"uid": f"c{c}:{k}", "r_label": score, "hit": True,
+                               "labels": ["a", "b", "c", "d", "e", "f"] if k == 0 else ["a", "b", "c"],
+                               "gt_labels": ["a", "b", "c"]})
+                claims.append({"uid": f"c{c}:{k}", "id": f"c{c}", "k": k, "claims": []})
+        bp.write_jsonl(d / "candidates.jsonl", cands)
+        bp.write_jsonl(d / "labels.jsonl", labels)
+        bp.write_jsonl(d / "claims.jsonl", claims)
+
+    def test_split_by_question_type(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            d = Path(tmp)
+            self.round_dir(d)
+            cfg = dict(CFG, verify_cache=str(d / "verify.jsonl"), ranking_types=["ovlabel"],
+                       length_penalty="symmetric", label_count_rule="closer_to_gt", margin_weighting=False)
+            summary = ranking.build(d, cfg, batch_size=1, seed=1, bp=bp, shared_weight=0.2)
+            pairs = bp.read_jsonl(d / "pairs.jsonl")
+            ov = [p for p in pairs if p["label_type"] == "ovlabel"]
+            de = [p for p in pairs if p["label_type"] == "description"]
+            self.assertTrue(ov and de)
+            self.assertEqual({(p["method"], p["shared_weight"]) for p in ov}, {("ranking", 0.2)})
+            self.assertEqual({(p["method"], p["shared_weight"], p["clip_pairs"]) for p in de}, {("grace", 1.0, 1)})
+            # GRACE pairing on description: answer 0 (0.9, raw - not penalised) vs the only bad answer (0.1)
+            self.assertEqual({(p["type"], p["chosen"], p["rejected"]) for p in de},
+                             {("L", "ans 1 0", "ans 1 3"), ("L", "ans 3 0", "ans 3 3")})
+            # ranking on ovlabel: answer 0 is penalised (6 labels vs 3 -> 0.45), so it is never chosen over 0.85
+            self.assertFalse(any(p["chosen_uid"].endswith(":0") for p in ov))
+            self.assertEqual(summary["by_method"], {"ranking": len(ov), "grace": len(de)})
+            self.assertEqual(summary["length_penalty"]["answers"], 16)   # ovlabel answers only
+            self.assertEqual(summary["length_penalty"]["penalised_answers"], 2)
+
+    def test_grace_pairs_equal_build_pairs(self):
+        recs = [rec("clip1:0", 0.9), rec("clip1:1", 0.1), rec("clip1:2", 0.8, n_contradicted=1, cues=["smiling"])]
+        gcfg = dict(CFG, **ranking.GRACE_DEFAULTS)
+        expected = bp.select_pairs(ORIGINAL, recs, gcfg)
+        got = ranking.grace_pairs(ORIGINAL, recs, CFG, bp)
+        self.assertEqual([{k: v for k, v in r.items() if k not in ("method", "shared_weight", "clip_pairs")} for r in got],
+                         expected)
+        self.assertEqual([r["type"] for r in got], ["H", "L"])
+
+    def test_extra_sampling_merge(self):
+        import run_optimised as ro
+        with tempfile.TemporaryDirectory() as tmp:
+            d = Path(tmp)
+            rows = [dict(ORIGINAL, id="o1", label_type="ovlabel", candidates=["a", "b", "c", "d"], end_tokens_stripped=1),
+                    dict(ORIGINAL, id="d1", label_type="description", candidates=["w", "x", "y", "z"])]
+            bp.write_jsonl(d / "candidates.jsonl", rows)
+            seen = {}
+
+            def fake_candidates(cfg, r, sub):
+                seen.update(k=cfg["k"], seed=cfg["seed"], ids=json.loads((sub / "ids.json").read_text()))
+                bp.write_jsonl(sub / "candidates.jsonl", [dict(rows[0], candidates=["e", "f", "g", "h"],
+                                                                end_tokens_stripped=2)])
+            old = ro.rg.stage_candidates
+            ro.rg.stage_candidates = fake_candidates
+            try:
+                ro.stage_extra({"k": 4, "k_ovlabel": 8, "seed": 0}, 1, d)
+                ro.stage_extra({"k": 4, "k_ovlabel": 8, "seed": 0}, 1, d)   # rerun: same result
+            finally:
+                ro.rg.stage_candidates = old
+            out = {r["id"]: r for r in bp.read_jsonl(d / "candidates.jsonl")}
+            self.assertEqual(seen, {"k": 4, "seed": 500000, "ids": ["o1"]})
+            self.assertEqual(out["o1"]["candidates"], list("abcdefgh"))
+            self.assertEqual(out["o1"]["end_tokens_stripped"], 3)
+            self.assertEqual(out["d1"]["candidates"], list("wxyz"))
+            self.assertEqual(len(bp.read_jsonl(d / "candidates.k.jsonl")[0]["candidates"]), 4)
+
+    def test_row_shared_weight(self):
+        data = object.__new__(oi.SegmentPairData)
+        data.shared_weight = 0.2
+        self.assertEqual(data.row_shared_weight({}), 0.2)
+        self.assertEqual(data.row_shared_weight({"shared_weight": 1.0}), 1.0)
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)

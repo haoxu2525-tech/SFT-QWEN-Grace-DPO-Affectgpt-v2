@@ -2,7 +2,17 @@
 
 GRACE-DPO with three method changes, chosen from the GRACE training curves and logs
 (`vendor/grace/results/loss-curves`). Everything else is GRACE setting C (no anchors, 10% warm-up,
-per-token log-probs, beta 2), which is the comparison point.
+per-token log-probs, beta 2).
+
+**The changes apply to ovlabel-question clips only.** The benchmark scores only label lists, and
+GRACE's ablations moved with the ovlabel pairs. Round 1: +80 to +154 ovlabel pairs (CK8 / CK12 / CK16)
+gave +1.2 to +1.9, while dropping 564 description pairs (D) changed the score by -0.28.
+| Question type | Answers per clip | Pairs | Loss |
+|---|---|---|---|
+| ovlabel | 8 (`k_ovlabel`) | ranking (change 2), label-count penalty and rule (change 4), at most 2 per clip | segment-weighted (change 1, shared tokens 0.2) |
+| description | 4 (`k`) | GRACE's own typed L / H / S pairing with setting C's values, raw label score, at most 2 per clip | setting C's: every token weighted 1 |
+
+The round-1 comparison point is CK8: setting C with 8 answers per ovlabel clip, on the same answers.
 
 ## What stays aligned with AffectGPT
 
@@ -11,7 +21,7 @@ per-token log-probs, beta 2), which is the comparison point.
 | Training data | the same MERCaptionPlus clip IDs, original questions, prompts, media and annotations; every pair is checked against the original AffectGPT row before training (GRACE's `validate_against_original`, unchanged) |
 | Clips per round | the same seed and order as GRACE, so round r uses the same 2,000 clips |
 | Model path | baseline `PairData` (native AV prompt), `OmniModel`, `OmniTrainer`, official DPO `BasicTrainer` loop, RMSprop, lr 5e-6, batch 8 x 8 accumulation, max length 4096 without truncation, reference = verified SFT epoch 30 |
-| Sampling, label extraction, claims, verification, export | GRACE's stages, called unchanged (`run_grace.py` functions) |
+| Sampling, label extraction, claims, verification, export | GRACE's stages, called unchanged (`run_grace.py` functions). The 4 extra ovlabel answers come from a second call of GRACE's unchanged candidates stage on the ovlabel clips (same policy, seeds offset by 500000), as the CK8 runs did |
 | Evaluation | `run_optimised.py eval` = GRACE `do_eval` = the baseline's unchanged v2 MER-UniBench `infer` + `evaluate` |
 
 ## What changes
@@ -83,14 +93,27 @@ All columns use a gap > 0.3 and a cap of 2 pairs per clip. Counts are distinct l
 
 Still check the label count of the evaluated answers after round 1.
 
-**Cost:** about 2.8x C's pairs per round, so training takes about 2.8x as long (C: ~2 h per round on one
-A40, so about 5.5 h). Sampling, labels, claims and verification are unchanged.
+The table above applies the new pairing to every clip at 4 answers. The default now applies it to
+ovlabel clips only, at 8 answers. Measured on CK8's round 1 (8 answers per ovlabel clip, 4 per
+description clip; pairs stage only, read-only):
+
+| | CK8 (GRACE) | default |
+|---|---|---|
+| pairs | 1,208 | 2,752 |
+| ovlabel pairs / clips with a pair | 274 / 274 of 984 (28%; one L pair at most per clip) | 1,817 (788 L, 1,029 R) / 921 of 984 (94%) |
+| description pairs | 934 (562 H, 369 L, 3 S) | 935 (562 H, 370 L, 3 S): the same GRACE pairing |
+| ovlabel median reward gap | — | 0.57 |
+| pair weight range (mean 1) | — | 0.74–1.48 |
+
+**Cost:** 4 more answers for each of the ~980 ovlabel clips cost about 1.25 h of sampling per round
+with 2 sampler processes (measured for CK8). Training has about 2.3x C's pairs, so about 4.5–5 h on
+one A40 (C: ~2 h). Claims and verification are unchanged (ovlabel answers have no claims).
 
 ## Files
 
 | File | |
 |---|---|
-| `run_optimised.py` | driver: `round`, `eval`, `status`, `reuse` (GRACE's driver with `pairs` and `train` replaced) |
+| `run_optimised.py` | driver: `round`, `eval`, `status`, `reuse` (GRACE's driver with `pairs` and `train` replaced and an `extra` sampling stage added) |
 | `ranking.py` | changes 2 and 4: label-count penalty and rule, ranking pairs, pair weights |
 | `segments.py` | change 1: diff / contradicted-cue spans → per-token weights |
 | `optimised_interface.py` | `SegmentPairData`, `segment_forward`, `SegmentTrainer`, weighted reference and post-training passes |
@@ -107,19 +130,20 @@ The GRACE code is pinned as `vendor/grace` (commit 29605ad). On the pod, the exi
 cd optimised-training
 export GRACE_ROOT=/workspace/grace WANDB_MODE=offline
 /workspace/grace-env/bin/python run_optimised.py reuse --config optimised.yaml --round 1 \
-    --from /workspace/grace-work/abl/C/round1          # same round-1 answers as C
+    --from /workspace/grace-work/abl/CK8/round1        # same round-1 answers as CK8 (8 ovlabel / 4 description)
 /workspace/grace-env/bin/python run_optimised.py round --config optimised.yaml --round 1
 /workspace/grace-env/bin/python run_optimised.py eval  --config optimised.yaml --round 1
 /workspace/grace-env/bin/python run_optimised.py round --config optimised.yaml --round 2
 ```
 
-Outputs are the same as GRACE (`/workspace/grace-work/optimised/roundN/`), plus `pair_weight` and
-`clip_pairs` in `pairs.jsonl`, `segment_*/chosen_weight_share` in the training stats, and
+Outputs are the same as GRACE (`/workspace/grace-work/optimised/roundN/`), plus `candidates.k.jsonl`
+(the first 4 answers) and `extra/` (the added ovlabel answers), `method`, `shared_weight`, `pair_weight`
+and `clip_pairs` in `pairs.jsonl`, `segment_*/chosen_weight_share` in the training stats, and
 `optimised-run.json`.
 
 ## Verification status
 
-`python test_optimised_cpu.py` passes (23 checks, set `OMNI_TOKENIZER` for the real-tokenizer
+`python test_optimised_cpu.py` passes (27 checks, set `OMNI_TOKENIZER` for the real-tokenizer
 check):
 - segment weights follow the official tokenisation, including the EOS token;
 - `segment_forward` equals the official `concatenated_forward` sums when every weight is 1, and the
@@ -130,9 +154,13 @@ check):
 - the ranking rules (gap strictly above 0.3, real margins, clip weights, optional linear gap weights), the label-count penalty
   (symmetric / linear / log) and the closer-to-GT count rule
   behave as described;
-- a full `build()` runs on a synthetic round.
+- a full `build()` runs on a synthetic round;
+- description clips get GRACE's `select_pairs` result unchanged, every token weighted 1, and no
+  count penalty, while ovlabel clips get ranking pairs;
+- the extra stage samples only the ovlabel clips (with offset seeds), appends 4 answers to each,
+  leaves description clips at 4, and gives the same result when rerun.
 
-The pairs stage was also run read-only on C's real round-1 files (numbers above).
+The pairs stage was also run read-only on the real round-1 files of C and CK8 (numbers above).
 
 Not run yet: the 7B GPU training path (data loading with real media, `SegmentTrainer` inside the
 official loop, the export), and any benchmark score.

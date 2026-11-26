@@ -15,7 +15,8 @@ paths:
 seed: 0                    # same clip order as GRACE: round r uses the same 2,000 clips
 rounds: 10
 clips_per_round: 2000
-k: 4
+k: 4                       # answers per description-question clip (as GRACE)
+k_ovlabel: 8               # NEW: answers per ovlabel-question clip (extra stage samples k_ovlabel - k more)
 
 sampling:
   processes: 2
@@ -49,7 +50,8 @@ loss:                      # GRACE loss, unchanged code, applied to weighted per
 
 segment:                   # NEW, change 1: claim-level (segment-weighted) DPO
   shared_weight: 0.2       # weight of tokens both answers share; differing / contradicted-cue tokens = 1.
-                           # 0.2 = RLHF-V DDPO gamma 5; 1.0 = setting C exactly
+                           # 0.2 = RLHF-V DDPO gamma 5; 1.0 = setting C exactly. Applies to ranking
+                           # (ovlabel) pairs; GRACE-method description pairs always use 1.0
 
 pairs:
   verify_cache: /workspace/grace-work/verify-cache.jsonl   # shared with GRACE (verdicts are per clip and cue)
@@ -59,13 +61,21 @@ pairs:
   ground_default: 0.5
   gt_ground_assumed: 1.0
   alpha: 0.5               # R = r_label' + alpha * r_ground
-  min_margin: 0.3          # NEW meaning, change 2: a ranked pair needs a reward gap strictly > 0.3
+  ranking_types: [ovlabel] # NEW: question types that get the new pairing below; the others
+                           # (description) get GRACE's own pairing with setting C's values (`grace:`)
+  grace:                   # setting C's pairing for description clips: an absolutely bad answer
+    min_margin: 0.2        #   (r_label <= label_bad, or a contradicted cue, or only non-affective cues),
+    h_min_margin: 0.3      #   typed L / H / S, raw r_label (no count penalty)
+    use_spurious: true
+    type_priority: [H, L, S]
+    max_pairs_per_clip: 2
+  min_margin: 0.3          # NEW meaning, change 2 (ovlabel): a ranked pair needs a reward gap strictly > 0.3
                            # (smaller gaps are mostly scoring noise); no h_min_margin floor
   max_pairs_per_clip: 2    # NEW, change 2: largest-gap pairs kept per clip (4 gives the same clip coverage
                            # on C round 1 at ~1.8x the pairs: 6,128 vs 3,488)
   margin_weighting: false  # true = pair weight linear in the gap instead (then set use_quality_weight: false)
   clip_normalize: true     # NEW, change 2: times 1/(pairs of its clip); weights rescaled to mean 1
-  length_penalty: symmetric  # NEW, change 4: label-count penalty min(n_pred, n_gt) / max(n_pred, n_gt), so
+  length_penalty: symmetric  # NEW, change 4 (ovlabel): label-count penalty min(n_pred, n_gt) / max(n_pred, n_gt), so
                            # over- and under-predicting are penalised alike (keeps chosen at the GT count).
                            # linear = AffectGPT-R1 P2 (only n_pred > n_gt: n_gt/n_pred); log = P3; none = off.
                            # linear made chosen answers 2.94 labels vs GT 3.37 on C round 1 (shrink risk)
