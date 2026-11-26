@@ -37,7 +37,8 @@ train:
 loss:                      # GRACE loss, unchanged code, applied to weighted per-token means
   label_smoothing: 0.0
   length_normalize: true   # required: the optimised loss is always a (weighted) per-token mean
-  use_quality_weight: true
+  use_quality_weight: false # the gap weighting is pairs.margin_weighting (linear in the gap); GRACE's
+                           # sigmoid(eta * gap) weight would weight by the gap a second time
   eta: 4.0
   c: 0.0
   gamma: 1.0
@@ -58,11 +59,12 @@ pairs:
   ground_default: 0.5
   gt_ground_assumed: 1.0
   alpha: 0.5               # R = r_label' + alpha * r_ground
-  min_margin: 0.2          # NEW meaning, change 2: smallest reward gap for a ranked pair
-  h_min_margin: 0.3
+  min_margin: 0.3          # NEW meaning, change 2: a ranked pair needs a reward gap strictly > 0.3
+                           # (smaller gaps are mostly scoring noise); no h_min_margin floor
   max_pairs_per_clip: 2    # NEW, change 2: largest-gap pairs kept per clip (4 gives the same clip coverage
                            # on C round 1 at ~1.8x the pairs: 6,128 vs 3,488)
-  clip_normalize: true     # NEW, change 2: pair weight 1/(pairs of its clip), mean 1
+  margin_weighting: true   # NEW, change 2: pair weight proportional to the reward gap
+  clip_normalize: true     # NEW, change 2: times 1/(pairs of its clip); weights rescaled to mean 1
   length_penalty: linear   # NEW, change 4: AffectGPT-R1 P2 (n_gt/n_pred when n_pred > n_gt); log = P3; none = off
   anchor_ratio: 0          # as C: no baseline anchor pairs
   replay_max_fraction: 0.1

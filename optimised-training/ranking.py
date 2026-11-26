@@ -11,16 +11,17 @@ re-extracted. GRACE's r_label (per-sample wheel F1) is otherwise unchanged.
 
 Change 2 (pairs). GRACE pairs a clip only when one of its K answers is absolutely bad
 (r_label <= label_bad); ~80% of ovlabel clips then give nothing. Here every clip's answers
-are ranked by R = r_label' + alpha * r_ground and every pair whose reward gap is at least
-min_margin is a candidate pair (the all-pairs decomposition of the clip's ranking), so a clip
-contributes as soon as its answers differ enough. Kept from GRACE:
+are ranked by R = r_label' + alpha * r_ground and every pair whose reward gap is strictly
+greater than min_margin (0.3; smaller gaps are mostly scoring noise) is a candidate pair (the
+all-pairs decomposition of the clip's ranking), so a clip contributes as soon as its answers
+differ clearly. The margin is always the real reward gap (GRACE's h_min_margin floor is not
+used: it would create pairs and weights from no gap). Kept from GRACE:
   - the chosen side never has a contradicted cue or low grounding (it must be "eligible");
   - if no answer reaches label_good, the original ground-truth answer joins the ranking as
-    the top item (GRACE's GT fallback);
-  - a rejected answer with a correct label but a contradicted cue gets margin >= h_min_margin.
-Each clip keeps its max_pairs_per_clip largest-gap pairs; with clip_normalize every pair is
-weighted 1/(pairs of its clip), rescaled so the round's mean pair weight is 1, so a clip
-with many pairs does not count more than a clip with one.
+    the top item (GRACE's GT fallback).
+Each clip keeps its max_pairs_per_clip largest-gap pairs. Pair weight (mean 1 over the round):
+    margin_weighting: pair weight proportional to the reward gap (a 0.9 gap counts 3x a 0.3 gap);
+    clip_normalize:   times 1/(pairs of its clip), so a clip with many pairs does not count more.
 """
 import json
 import math
@@ -76,11 +77,9 @@ def rank_pairs(original, recs, cfg, reward, make_row):
                 ptype = "L"
             elif b["r_label"] >= cfg["label_good"] and b["n_contradicted"] >= 1:
                 ptype = "H"
-                if a["r_label"] >= cfg["label_good"]:
-                    margin = max(margin, cfg["h_min_margin"])
             else:
                 ptype = "R"   # ranked: neither absolutely bad nor hallucinated, just worse
-            if margin < cfg["min_margin"]:
+            if margin <= cfg["min_margin"] + 1e-9:   # strictly greater; 1e-9 absorbs float error
                 continue
             found.append((margin, a, b, ptype))
     found.sort(key=lambda x: (-x[0], x[1]["key"], x[2]["key"]))
@@ -97,14 +96,17 @@ def rank_pairs(original, recs, cfg, reward, make_row):
     return rows
 
 
-def assign_pair_weights(rows, clip_normalize):
-    """pair_weight = (1 / pairs of the clip), rescaled to mean 1 over the round's rows.
-    Replayed rows keep their own clip share."""
-    if not clip_normalize:
-        for r in rows:
-            r["pair_weight"] = 1.0
-        return rows
-    raw = [1.0 / max(1, int(r.get("clip_pairs") or 1)) for r in rows]
+def assign_pair_weights(rows, clip_normalize, margin_weighting=True):
+    """pair_weight = margin (if margin_weighting) x 1/(pairs of the clip) (if clip_normalize),
+    rescaled to mean 1 over the round's rows. Replayed rows keep their own margin and clip share."""
+    raw = []
+    for r in rows:
+        w = float(r["margin"]) if margin_weighting else 1.0
+        if clip_normalize:
+            w /= max(1, int(r.get("clip_pairs") or 1))
+        raw.append(w)
+    if min(raw) <= 0:
+        raise ValueError("Pair weights must be positive")
     mean = sum(raw) / len(raw)
     for r, w in zip(rows, raw):
         r["pair_weight"] = w / mean
@@ -140,7 +142,7 @@ def build(round_dir, cfg, batch_size, seed, replay_rows=(), bp=None):
     allp, dropped = allp[:keep], allp[keep:]
     if not allp:
         raise RuntimeError("Fewer pairs than one training batch")
-    assign_pair_weights(allp, cfg.get("clip_normalize", True))
+    assign_pair_weights(allp, cfg.get("clip_normalize", True), cfg.get("margin_weighting", True))
     bp.write_jsonl(round_dir / "pairs.jsonl", allp)
     bp.write_jsonl(round_dir / "pairs.dropped.jsonl", dropped)
     pens = [rec["length_penalty"] for _, recs in clips.values() for rec in recs]

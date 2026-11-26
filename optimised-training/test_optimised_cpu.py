@@ -249,8 +249,8 @@ def rec(uid, r_label, n_contradicted=0, r_ground=None, response=None, n_labels=3
 ORIGINAL = {k: f"<{k}>" for k in bp.ORIGINAL_FIELDS}
 ORIGINAL.update(id="clip1", ground_truth_answer="GT answer", label_type="ovlabel")
 CFG = {"label_good": 0.5, "label_bad": 0.2, "ground_good": 0.6, "ground_default": 0.5, "gt_ground_assumed": 1.0,
-       "alpha": 0.5, "min_margin": 0.2, "h_min_margin": 0.3, "max_pairs_per_clip": 4,
-       "clip_normalize": True, "length_penalty": "linear", "anchor_ratio": 0, "replay_max_fraction": 0.1}
+       "alpha": 0.5, "min_margin": 0.3, "max_pairs_per_clip": 4,
+       "clip_normalize": True, "margin_weighting": True, "length_penalty": "linear", "anchor_ratio": 0, "replay_max_fraction": 0.1}
 
 
 class Ranking(unittest.TestCase):
@@ -265,27 +265,36 @@ class Ranking(unittest.TestCase):
         self.assertEqual(ranking.length_penalty(3, 0, "linear"), 1.0)
 
     def test_relative_pair_without_bad_answer(self):
-        # GRACE: no answer <= 0.2, so no pair. Ranking: 0.9 vs 0.6 is a pair (gap 0.3).
-        rows = self.pairs([rec("clip1:0", 0.9), rec("clip1:1", 0.6), rec("clip1:2", 0.75)])
+        # GRACE: no answer <= 0.2, so no pair. Ranking: 0.9 vs 0.55 is a pair (gap 0.35 > 0.3);
+        # 0.9 vs 0.75 and 0.75 vs 0.55 are not.
+        rows = self.pairs([rec("clip1:0", 0.9), rec("clip1:1", 0.55), rec("clip1:2", 0.75)])
         self.assertEqual([(r["chosen_uid"], r["rejected_uid"], r["type"]) for r in rows],
                          [("clip1:0", "clip1:1", "R")])
         self.assertEqual(rows[0]["id"], "clip1#0>1")
-        self.assertEqual(bp.select_pairs(ORIGINAL, [rec("clip1:0", 0.9), rec("clip1:1", 0.6)],
+        self.assertEqual(bp.select_pairs(ORIGINAL, [rec("clip1:0", 0.9), rec("clip1:1", 0.55)],
                                          dict(CFG, type_priority=["H", "L", "S"], use_spurious=True,
-                                              max_pairs_per_clip=2)), [])
+                                              max_pairs_per_clip=2, h_min_margin=0.3)), [])
+
+    def test_gap_must_exceed_threshold(self):
+        self.assertEqual(self.pairs([rec("clip1:0", 0.8), rec("clip1:1", 0.5)]), [])   # gap exactly 0.3
+        self.assertEqual(len(self.pairs([rec("clip1:0", 0.81), rec("clip1:1", 0.5)])), 1)
 
     def test_gt_fallback_and_types(self):
         rows = self.pairs([rec("clip1:0", 0.4), rec("clip1:1", 0.1)])
         got = {(r["chosen_uid"], r["rejected_uid"], r["type"]) for r in rows}
-        self.assertEqual(got, {("gt", "clip1:0", "R"), ("gt", "clip1:1", "L"), ("clip1:0", "clip1:1", "L")})
+        # 0.4 vs 0.1 has a gap of exactly 0.3, so only the GT pairs remain
+        self.assertEqual(got, {("gt", "clip1:0", "R"), ("gt", "clip1:1", "L")})
         self.assertEqual(rows[0]["chosen"], "GT answer")
 
-    def test_hallucinated_answer_never_chosen_and_margin_floor(self):
-        rows = self.pairs([rec("clip1:0", 0.7, r_ground=1.0), rec("clip1:1", 0.8, n_contradicted=1,
-                                                                   r_ground=0.5, cues=["smiling"])])
+    def test_hallucinated_answer_never_chosen_and_real_margin(self):
+        rows = self.pairs([rec("clip1:0", 0.7, r_ground=1.0), rec("clip1:1", 0.6, n_contradicted=1,
+                                                                   r_ground=0.0, cues=["smiling"])])
         self.assertEqual(len(rows), 1)
         self.assertEqual((rows[0]["chosen_uid"], rows[0]["type"]), ("clip1:0", "H"))
-        self.assertAlmostEqual(rows[0]["margin"], 0.3)
+        self.assertAlmostEqual(rows[0]["margin"], 0.6)   # the real gap, no floor
+        # a small real gap is not raised to a pair
+        self.assertEqual(self.pairs([rec("clip1:0", 0.7, r_ground=1.0),
+                                     rec("clip1:1", 0.8, n_contradicted=1, r_ground=0.5)]), [])
         self.assertEqual(rows[0]["contradicted_cues"], ["smiling"])
 
     def test_cap_and_identical_text(self):
@@ -298,11 +307,18 @@ class Ranking(unittest.TestCase):
         self.assertFalse(any(r["chosen"] == r["rejected"] for r in rows))
 
     def test_pair_weights(self):
-        rows = [{"clip_pairs": 1}, {"clip_pairs": 4}, {"clip_pairs": 4}, {"clip_pairs": 4}, {"clip_pairs": 4}]
-        ranking.assign_pair_weights(rows, True)
+        rows = [{"clip_pairs": 1, "margin": 0.4}, {"clip_pairs": 1, "margin": 1.2},
+                {"clip_pairs": 2, "margin": 0.4}, {"clip_pairs": 2, "margin": 0.8}]
+        ranking.assign_pair_weights(rows, False, True)       # proportional to the gap
         self.assertAlmostEqual(sum(r["pair_weight"] for r in rows) / len(rows), 1.0)
-        self.assertAlmostEqual(rows[0]["pair_weight"], 4 * rows[1]["pair_weight"])
-        ranking.assign_pair_weights(rows, False)
+        self.assertAlmostEqual(rows[1]["pair_weight"], 3 * rows[0]["pair_weight"])
+        self.assertAlmostEqual(rows[3]["pair_weight"], 2 * rows[2]["pair_weight"])
+        ranking.assign_pair_weights(rows, True, True)        # gap x clip share
+        self.assertAlmostEqual(rows[0]["pair_weight"], 2 * rows[2]["pair_weight"])
+        self.assertAlmostEqual(sum(r["pair_weight"] for r in rows) / len(rows), 1.0)
+        ranking.assign_pair_weights(rows, True, False)       # clip share only
+        self.assertAlmostEqual(rows[0]["pair_weight"], 2 * rows[3]["pair_weight"])
+        ranking.assign_pair_weights(rows, False, False)
         self.assertEqual({r["pair_weight"] for r in rows}, {1.0})
 
     def test_build_synthetic_round(self):
@@ -314,7 +330,7 @@ class Ranking(unittest.TestCase):
                 cands.append(row)
                 for k in range(4):
                     n_pred = 6 if k == 0 else 2
-                    labels.append({"uid": f"c{c}:{k}", "r_label": [0.9, 0.6, 0.55, 0.3][k], "hit": True,
+                    labels.append({"uid": f"c{c}:{k}", "r_label": [0.9, 0.7, 0.65, 0.2][k], "hit": True,
                                    "labels": [f"l{i}" for i in range(n_pred)], "gt_labels": ["a", "b", "c"]})
             bp.write_jsonl(d / "candidates.jsonl", cands)
             bp.write_jsonl(d / "labels.jsonl", labels)
@@ -324,7 +340,7 @@ class Ranking(unittest.TestCase):
             pairs = bp.read_jsonl(d / "pairs.jsonl")
             self.assertEqual(len(pairs) % 4, 0)
             self.assertEqual(summary["length_penalty"]["penalised_answers"], 6)
-            # answer 0 (r_label 0.9, 6 labels vs 3) is penalised to 0.45, so answer 1 (0.6) ranks first
+            # answer 0 (r_label 0.9, 6 labels vs 3) is penalised to 0.45, so answers 1 / 2 rank first
             self.assertTrue(all(p["chosen_uid"].endswith(":1") or p["chosen_uid"].endswith(":2") for p in pairs))
             self.assertAlmostEqual(sum(p["pair_weight"] for p in pairs) / len(pairs), 1.0)
             with self.assertRaises(ValueError):
