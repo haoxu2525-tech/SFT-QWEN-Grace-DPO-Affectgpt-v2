@@ -1,0 +1,12 @@
+adopt CK12 1
+validate CK12 1
+eval CK12 1
+round CK8-S 1 /workspace/grace-work/abl/CK8/round1
+validate CK8-S 1
+eval CK8-S 1
+round CK8-N 1 /workspace/grace-work/abl/CK8/round1
+validate CK8-N 1
+eval CK8-N 1
+round CK12 2
+validate CK12 2
+eval CK12 2

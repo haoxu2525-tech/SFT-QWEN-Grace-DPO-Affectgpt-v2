@@ -1,0 +1,76 @@
+paths:
+  runtime: /workspace/grace-runtime
+  dataset_root: /workspace/dataset
+  snapshot: /workspace/hf-cache/models--Qwen--Qwen2.5-Omni-7B/snapshots/ae9e1690543ffd5c0221dc27f79834d0294cba00
+  epoch30_checkpoint: /workspace/grace/vendor/standard-dpo/vendor/sft/checkpoints/sft-epochs-30-60/checkpoint_000030_loss_0.737.pth
+  baseline_pairs: /workspace/grace/vendor/standard-dpo/qwen3.8omniflash annotation
+  baseline_eval_pairs: /workspace/grace-work/training-monitor.jsonl
+  work_dir: /workspace/grace-work/v2/CK8
+  model_cache: /workspace/hf-cache
+seed: 0
+rounds: 2
+clips_per_round: 2000
+k: 4
+k_ovlabel: 8
+sampling:
+  processes: 2
+  threads_per_process: 4
+  remotes: []
+train:
+  beta: 2.0
+  lr: 5.0e-06
+  warmup_ratio: 0.1
+  batch_size: 8
+  gradient_accumulation_steps: 8
+  eval_batch_size: 1
+  n_eval_examples: 16
+  max_length: 4096
+  reference: precomputed
+  keep_full_policy: false
+loss:
+  label_smoothing: 0.0
+  length_normalize: true
+  use_quality_weight: true
+  eta: 4.0
+  c: 0.0
+  gamma: 1.0
+  nll_weight: 0.05
+  nll_min_chosen_score: median
+  normalize_weights: true
+  ema_decay: 0.98
+segment:
+  shared_weight: 0.2
+pairs:
+  verify_cache: /workspace/grace-work/v2/CK8/verify-cache.jsonl
+  label_good: 0.5
+  label_bad: 0.2
+  ground_good: 0.6
+  ground_default: 0.5
+  gt_ground_assumed: 1.0
+  alpha: 0.5
+  ranking_types:
+  - ovlabel
+  grace:
+    min_margin: 0.2
+    h_min_margin: 0.3
+    use_spurious: true
+    type_priority:
+    - H
+    - L
+    - S
+    max_pairs_per_clip: 2
+  min_margin: 0.3
+  max_pairs_per_clip: 2
+  margin_weighting: false
+  clip_normalize: true
+  length_penalty: symmetric
+  label_count_rule: closer_to_gt
+  anchor_ratio: 0
+  replay_max_fraction: 0.1
+verify:
+  support: 0.7
+  contradict: 0.15
+  fps: 2.0
+  max_frames: 24
+  max_pixels: 200704
+  claims_per_batch: 4

@@ -1,0 +1,7 @@
+2026-11-26T06:07:02Z gpu0 lane started
+2026-11-26T06:45:03Z gpu0 done C round 1: {"clips":2000,"pairs":2352,"by_type":{"L":893,"H":562,"S":3,"R":894},"by_question_type":{"ovlabel":1417,"description":935},"by_method":{"ranking":1417,"grace":935},"dropped_incomplete_batch":2,"replay
+2026-11-26T06:45:03Z gpu0 start validation of C round 1
+2026-11-26T08:37:43Z gpu0 validated C round 1: all 65.47 (+-1.00, 500 clips) ovlabel 68.69 (+-1.34, 253 clips) description 62.17 (+-1.47, 247 clips)
+2026-11-26T08:37:43Z gpu0 start validation of C round 0
+2026-11-26T10:27:41Z gpu0 validated C round 0: all 64.56 (+-1.00, 500 clips) ovlabel 68.10 (+-1.37, 253 clips) description 60.94 (+-1.41, 247 clips)
+2026-11-26T10:27:41Z gpu0 waiting for the benchmark score of C round 1

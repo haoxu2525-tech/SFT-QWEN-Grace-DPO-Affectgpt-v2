@@ -1,0 +1,5 @@
+2026-11-26T06:07:02Z gpu2 lane started
+2026-11-26T07:18:04Z gpu2 done CK12 round 1: {"clips":2000,"pairs":2848,"by_type":{"L":1311,"H":561,"S":3,"R":973},"by_question_type":{"ovlabel":1914,"description":934},"by_method":{"ranking":1914,"grace":934},"dropped_incomplete_batch":7,"repla
+2026-11-26T07:18:04Z gpu2 start validation of CK12 round 1
+2026-11-26T09:09:24Z gpu2 validated CK12 round 1: all 68.45 (+-0.98, 500 clips) ovlabel 72.44 (+-1.28, 253 clips) description 64.37 (+-1.45, 247 clips)
+2026-11-26T09:09:24Z gpu2 waiting for the benchmark score of CK12 round 1

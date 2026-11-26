@@ -1,0 +1,5 @@
+2026-11-26T06:07:02Z gpu1 lane started
+2026-11-26T07:11:34Z gpu1 done CK8 round 1: {"clips":2000,"pairs":2752,"by_type":{"L":1158,"H":562,"S":3,"R":1029},"by_question_type":{"ovlabel":1817,"description":935},"by_method":{"ranking":1817,"grace":935},"dropped_incomplete_batch":1,"repl
+2026-11-26T07:11:34Z gpu1 start validation of CK8 round 1
+2026-11-26T09:02:52Z gpu1 validated CK8 round 1: all 67.37 (+-1.00, 500 clips) ovlabel 71.70 (+-1.29, 253 clips) description 62.92 (+-1.49, 247 clips)
+2026-11-26T09:02:52Z gpu1 waiting for the benchmark score of CK8 round 1
