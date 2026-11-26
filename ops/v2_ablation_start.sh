@@ -1,13 +1,14 @@
 #!/bin/sh
 # Operations script on the pod, not part of the method. Run once while v2 C / CK8 / CK12 round 1
 # is still training (started by v2_start.sh):
-#   - creates the one-change-at-a-time settings on CK8 round 1's answers (each adds one change
-#     to the one before it; CK8 itself = GRACE v1 CK8, score 75.39; v2 CK8 = all four):
-#       CK8-R    ranking pairs on ovlabel clips
-#       CK8-RP   + count-penalised reward and label-count rule
-#       CK8-RPS  + segment weighting (shared_weight 0.2)
-#       (v2 CK8  + 1/(pairs of its clip) weights: clip normalisation alone changes nothing on
-#                GRACE's pairs, because no ovlabel clip has two of them)
+#   - creates the single-change settings on CK8 round 1's answers: each is GRACE v1 CK8 (score
+#     75.39) plus exactly one of the four changes, on ovlabel clips (v2 CK8 = all four):
+#       CK8-R    ranking pairs
+#       CK8-P    count-penalised reward and label-count rule, on GRACE's pairs
+#       CK8-S    segment weighting (shared_weight 0.2), on GRACE's pairs
+#       CK8-N    1/(pairs of its clip) weights, on GRACE's pairs. No ovlabel clip has two GRACE
+#                pairs, so its pairs and weights equal CK8's: it is a second run of CK8 through
+#                the v2 trainer and shows the run-to-run spread, not an effect
 #   - replaces each GPU's v2_chain.sh by a v2_lane.sh queue: the running round 1 is adopted, then
 #     validation and benchmark evaluation of round 1 (GPU 0 also validates SFT epoch 30 =
 #     round 0, the reference), one new setting, and last the setting's own round 2. Only v2
@@ -20,7 +21,7 @@ PY=/workspace/grace-env/bin/python
 V=/workspace/grace-work/v2
 SRC=/workspace/grace-work/abl/CK8/round1
 pgrep -f "v2_lane.sh" > /dev/null && { echo "lanes are running already"; exit 1; }
-for spec in "CK8-R ranking" "CK8-RP ranking,penalty" "CK8-RPS ranking,penalty,segment"; do
+for spec in "CK8-R ranking" "CK8-P penalty" "CK8-S segment" "CK8-N clipnorm"; do
   set -- $spec; X=$1; W=$V/$X
   mkdir -p $W
   [ -f $W/verify-cache.jsonl ] || cp $V/CK8/verify-cache.jsonl $W/verify-cache.jsonl
@@ -37,7 +38,7 @@ cfg["rounds"] = 1
 cfg["pairs"]["ranking_types"] = ["ovlabel"] if "ranking" in on else []
 cfg["pairs"]["penalty_types"] = ["ovlabel"] if "penalty" in on else []
 cfg["pairs"]["segment_types"] = ["ovlabel"] if "segment" in on else []
-cfg["pairs"]["clip_normalize_types"] = []
+cfg["pairs"]["clip_normalize_types"] = ["ovlabel"] if "clipnorm" in on else []
 out = w / "optimised.yaml"
 if out.exists() and yaml.safe_load(out.read_text()) != cfg:
     raise SystemExit(f"{out} exists with different settings")
@@ -62,9 +63,9 @@ plan 1 <<EOF
 adopt CK8 1
 validate CK8 1
 eval CK8 1
-round CK8-RP 1 $SRC
-validate CK8-RP 1
-eval CK8-RP 1
+round CK8-P 1 $SRC
+validate CK8-P 1
+eval CK8-P 1
 round CK8 2
 validate CK8 2
 eval CK8 2
@@ -73,9 +74,12 @@ plan 2 <<EOF
 adopt CK12 1
 validate CK12 1
 eval CK12 1
-round CK8-RPS 1 $SRC
-validate CK8-RPS 1
-eval CK8-RPS 1
+round CK8-S 1 $SRC
+validate CK8-S 1
+eval CK8-S 1
+round CK8-N 1 $SRC
+validate CK8-N 1
+eval CK8-N 1
 round CK12 2
 validate CK12 2
 eval CK12 2

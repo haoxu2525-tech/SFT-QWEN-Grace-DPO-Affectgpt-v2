@@ -153,9 +153,10 @@ round 1's answers, no training:
 | clip normalisation alone | 1,208 | 274 | **no effect**: no ovlabel clip has two GRACE pairs |
 | all four (= v2 CK8) | 2,752 | 1,818 | |
 
-Because clip normalisation does nothing without ranking, and the other two touch only 274 pairs on
-their own, the comparison adds one change at a time in this order: CK8 → CK8-R (ranking) → CK8-RP
-(+ count penalty) → CK8-RPS (+ segment weighting) → v2 CK8 (+ clip normalisation).
+The comparison run on the pod tests each change alone on v1 CK8 (user decision): CK8-R, CK8-P,
+CK8-S and CK8-N, one row of the table each. Two limits follow from the table: CK8-N trains on the
+same pairs and weights as CK8, so it only shows the run-to-run spread; CK8-S changes the weights of
+274 of 1,208 pairs, against 1,818 of 2,752 in the full method.
 
 ## Files
 
