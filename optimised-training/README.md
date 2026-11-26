@@ -24,12 +24,16 @@ an answer is the weighted per-token mean. GRACE's loss code then runs unchanged 
 and so does its chosen-NLL term, which now mostly pulls up the chosen answer's differing segments.
 With `shared_weight: 1` and every pair weight at 1, this is exactly setting C (checked on CPU).
 
-**2. Pairs from the within-clip ranking** (`ranking.py`).
-The K answers of a clip are ranked by R = r_label' + 0.5 r_ground. Every pair with a reward gap of at
-least 0.2 is a candidate, and the 2 largest-gap pairs per clip are kept. Previously one of the answers
-had to be absolutely bad (r_label <= 0.2). As in GRACE, the chosen side never carries a contradicted
-cue, and the ground truth joins the ranking only if no answer reaches 0.5. Each pair is weighted
-1/(pairs of its clip), rescaled to a mean of 1.
+**2. Pairs from the within-clip ranking, weighted by the reward gap** (`ranking.py`).
+The K answers of a clip are ranked by R = r_label' + 0.5 r_ground. Every pair with a reward gap
+**strictly greater than 0.3** is a candidate; smaller gaps are mostly scoring noise. The 2 largest-gap
+pairs per clip are kept. Previously one of the answers had to be absolutely bad (r_label <= 0.2).
+As in GRACE, the chosen side never carries a contradicted cue, and the ground truth joins the ranking
+only if no answer reaches 0.5. The margin is always the real gap (GRACE's 0.3 floor for hallucination
+pairs is not used).
+Each pair's loss is weighted by **gap x 1/(pairs of its clip)**, rescaled to a mean of 1, so a 0.9 gap
+counts 3x a 0.3 gap. GRACE's own sigmoid gap weight (`loss.use_quality_weight`) is turned off so the
+gap is not weighted twice.
 
 **4. Length-penalised label reward** (`ranking.py`).
 AffectGPT-R1's penalty: r_label' = r_label x n_gt / n_pred when the answer predicts more distinct
@@ -38,22 +42,26 @@ counts come from GRACE's unchanged `score_labels.py` output, so nothing is re-ex
 
 ## Measured on setting C's round 1 (same 2,000 clips and answers, pairs stage only, no training)
 
-| | C (GRACE) | ranking, no penalty | ranking + penalty (default) |
-|---|---|---|---|
-| pairs (cap 2 per clip) | 1,128 | 3,168 | 3,488 |
-| ovlabel clips with a pair | ~20% | 661 / 984 (67%) | 798 / 984 (81%) |
-| answers penalised | — | — | 2,348 / 8,000 (mean factor 0.89) |
-| ovlabel pairs: chosen vs rejected label count | 3.62 vs 2.79 | 3.56 vs 3.43 | 2.97 vs 3.98 |
-| ovlabel pairs where chosen has fewer labels | 23% | 38% | 64% |
+| | C (GRACE) | gap > 0.3, no penalty | gap > 0.3 + penalty (default) | gap >= 0.2 + penalty |
+|---|---|---|---|---|
+| pairs (cap 2 per clip) | 1,128 | 2,312 | 2,848 | 3,344 |
+| by type L / H / R | 564 / 561 / 3 S | 1,008 / 303 / 1,001 | 1,099 / 231 / 1,518 | 1,109 / 316 / 1,919 |
+| ovlabel clips with a pair | ~20% | 471 / 984 (48%) | 663 / 984 (67%) | 789 / 984 (80%) |
+| median reward gap | — | 0.58 | 0.60 | 0.53 |
+| pair weight range (mean 1) | — | 0.43–3.57 | 0.43–2.88 | 0.33–2.43 |
+| ovlabel pairs: chosen vs rejected label count | 3.62 vs 2.79 | 3.61 vs 3.32 | 2.90 vs 3.99 | 2.98 vs 4.00 |
+| ovlabel pairs where chosen has fewer labels | 23% | 34% | 65% | 64% |
 
-A cap of 4 gives 5,408 / 6,128 pairs with the same clip coverage.
+Answers penalised by the length rule: 2,348 of 8,000 (mean factor 0.89). There are fewer H pairs
+than in C because C raised small hallucination gaps to 0.3; here a hallucination pair needs a real
+gap above 0.3.
 
-**Risk to watch:** with the penalty, the chosen answer has fewer labels than the rejected one in 64%
+**Risk to watch:** with the penalty, the chosen answer has fewer labels than the rejected one in 65%
 of ovlabel pairs. Standard DPO's label shrink (3.26 → 2.91 labels per answer) went with a lower
 benchmark score. The penalty only acts above the ground-truth count, but check the label count of
 the evaluated answers after round 1. `pairs-summary.json` reports these counts every round.
 
-**Cost:** about 3x C's pairs per round, so training takes about 3x as long (C: ~2 h per round on one
+**Cost:** about 2.5x C's pairs per round, so training takes about 2.5x as long (C: ~2 h per round on one
 A40, so about 6 h). Sampling, labels, claims and verification are unchanged.
 
 ## Files
@@ -89,7 +97,7 @@ Outputs are the same as GRACE (`/workspace/grace-work/optimised/roundN/`), plus 
 
 ## Verification status
 
-`python test_optimised_cpu.py` passes (19 checks, set `OMNI_TOKENIZER` for the real-tokenizer
+`python test_optimised_cpu.py` passes (20 checks, set `OMNI_TOKENIZER` for the real-tokenizer
 check):
 - segment weights follow the official tokenisation, including the EOS token;
 - `segment_forward` equals the official `concatenated_forward` sums when every weight is 1, and the
@@ -97,7 +105,8 @@ check):
 - the loss equals setting C's GRACE loss when every weight is 1;
 - pair weights scale each pair's loss;
 - the post-training preference probability matches the loss;
-- the ranking rules and length penalty behave as described;
+- the ranking rules (gap strictly above 0.3, real margins, gap x clip weights) and the length penalty
+  behave as described;
 - a full `build()` runs on a synthetic round.
 
 The pairs stage was also run read-only on C's real round-1 files (numbers above).
