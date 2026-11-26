@@ -63,6 +63,12 @@ pairs:
   alpha: 0.5               # R = r_label' + alpha * r_ground
   ranking_types: [ovlabel] # NEW: question types that get the new pairing below; the others
                            # (description) get GRACE's own pairing with setting C's values (`grace:`)
+  # The three keys below switch the other changes on per question type, independently of
+  # ranking_types, so each change can be tested alone on GRACE's pairs ([] = off). Left equal to
+  # ranking_types they give the full method.
+  penalty_types: [ovlabel]         # count-penalised reward (length_penalty) + label_count_rule
+  segment_types: [ovlabel]         # segment.shared_weight on the pair's tokens (others: weight 1)
+  clip_normalize_types: [ovlabel]  # 1/(pairs of its clip) pair weight (needs clip_normalize: true)
   grace:                   # setting C's pairing for description clips: an absolutely bad answer
     min_margin: 0.2        #   (r_label <= label_bad, or a contradicted cue, or only non-affective cues),
     h_min_margin: 0.3      #   typed L / H / S, raw r_label (no count penalty)
@@ -82,6 +88,11 @@ pairs:
   label_count_rule: closer_to_gt   # NEW: keep a pair only if |n_chosen - n_gt| <= |n_rejected - n_gt|; none = off
   anchor_ratio: 0          # as C: no baseline anchor pairs
   replay_max_fraction: 0.1
+
+validation:                # held-out clips for choosing rounds / settings (never the test benchmark)
+  clips: 500               # the LAST 500 clips of the seeded clip order; rounds take theirs from the front
+  k: 4                     # answers sampled per clip (same sampling path as the candidates stage)
+  processes: 2             # sampler processes on this GPU (local only)
 
 verify:
   support: 0.7

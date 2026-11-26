@@ -4,6 +4,7 @@
   python run_optimised.py eval   --config optimised.yaml --round 1   # baseline v2 MER-UniBench, unchanged
   python run_optimised.py status --config optimised.yaml
   python run_optimised.py reuse  --config optimised.yaml --round 1 --from /workspace/grace-work/abl/CK8/round1
+  python run_optimised.py validate --config optimised.yaml --round 1   # held-out wheel F1 (validation.py); 0 = SFT
 
 Stages ids, candidates (K on-policy answers), labels (AffectGPT extractor + wheel F1), claims,
 verify and export are GRACE's, called unchanged. `extra` (new, after candidates) samples
@@ -146,7 +147,7 @@ def reuse(cfg, r, source):
 
 def main():
     ap = argparse.ArgumentParser(description=__doc__)
-    ap.add_argument("command", choices=["round", "eval", "status", "reuse"])
+    ap.add_argument("command", choices=["round", "eval", "status", "reuse", "validate"])
     ap.add_argument("--config", type=Path, default=HERE / "optimised.yaml")
     ap.add_argument("--round", type=int)
     ap.add_argument("--from", dest="source", type=Path)
@@ -162,6 +163,9 @@ def main():
         rg.do_eval(cfg, args.round)
     elif args.command == "reuse":
         reuse(cfg, args.round, args.source)
+    elif args.command == "validate":
+        import validation
+        validation.validate(cfg, args.round, rg)
     else:
         for r in range(1, cfg["rounds"] + 1):
             d = rg.round_dir(cfg, r)

@@ -109,11 +109,60 @@ description clip; pairs stage only, read-only):
 with 2 sampler processes (measured for CK8). Training has about 2.3x C's pairs, so about 4.5–5 h on
 one A40 (C: ~2 h). Claims and verification are unchanged (ovlabel answers have no claims).
 
+## Held-out validation (`validation.py`)
+
+Rounds and settings were so far chosen by their MER-UniBench score, the test benchmark itself.
+`run_optimised.py validate --round r` gives a score from the training corpus instead:
+
+- **Clips:** the last 500 clips of the seeded clip order. Rounds take their 2,000 clips from the front
+  of that order (10 rounds leave the last 11,256 of 31,256 unused), so no round of any setting trains
+  on them, and every setting (v1 and v2, same seed) is validated on the same 500.
+- **Answers:** 4 per clip, sampled by GRACE's unchanged candidates stage from round r's exported
+  checkpoint (`--round 0` = SFT epoch 30), with the clip's own AffectGPT question (ovlabel or
+  description, as in training). No new prompt.
+- **Score:** GRACE's unchanged label stage (AffectGPT extractor + per-sample emotion-wheel F1 against
+  the clip's ground-truth labels), averaged per clip and then over clips, x100. Reported for all
+  clips and per question type, with the standard error over clips, in
+  `<work_dir>/validation/round<r>/validation.json`.
+
+The command also accepts a GRACE v1 config (`grace.yaml`), so v1 exports are scored on the same
+clips. Sampling is at temperature 1 and not seeded to repeat, so two runs of one checkpoint differ a
+little; with 500 clips x 4 answers, differences of about one point are within noise.
+
+## Switching each change on alone
+
+Four lists of question types in `pairs:` switch the changes independently (`[]` = off):
+
+| Key | Change | Off means |
+|---|---|---|
+| `ranking_types` | 2: pairs from the within-clip ranking | GRACE's own pairs (one answer absolutely bad) |
+| `penalty_types` | 4: count-penalised reward and `label_count_rule` | raw wheel F1, no count rule |
+| `segment_types` | 1: `segment.shared_weight` on the pair's tokens | every token weighted 1 |
+| `clip_normalize_types` | 2: pair weight x 1/(pairs of its clip) | every pair weighted alike |
+
+The last three default to `ranking_types`, which gives the full method. With all four `[]` the
+pairs are exactly GRACE v1's (checked on CK8 round 1: the same 1,208 pairs). Pairs stage on CK8
+round 1's answers, no training:
+
+| Setting | Pairs | ovlabel pairs | Note |
+|---|---|---|---|
+| all off (= v1 CK8) | 1,208 | 274 | |
+| ranking | 2,224 | 1,290 | |
+| count penalty alone | 1,352 | 420 | on GRACE's pairs |
+| segment weighting alone | 1,208 | 274 | weight 0.2 on the 274 ovlabel pairs only |
+| clip normalisation alone | 1,208 | 274 | **no effect**: no ovlabel clip has two GRACE pairs |
+| all four (= v2 CK8) | 2,752 | 1,818 | |
+
+Because clip normalisation does nothing without ranking, and the other two touch only 274 pairs on
+their own, the comparison adds one change at a time in this order: CK8 → CK8-R (ranking) → CK8-RP
+(+ count penalty) → CK8-RPS (+ segment weighting) → v2 CK8 (+ clip normalisation).
+
 ## Files
 
 | File | |
 |---|---|
-| `run_optimised.py` | driver: `round`, `eval`, `status`, `reuse` (GRACE's driver with `pairs` and `train` replaced and an `extra` sampling stage added) |
+| `run_optimised.py` | driver: `round`, `eval`, `status`, `reuse`, `validate` (GRACE's driver with `pairs` and `train` replaced and an `extra` sampling stage added) |
+| `validation.py` | held-out validation score of a round's export |
 | `ranking.py` | changes 2 and 4: label-count penalty and rule, ranking pairs, pair weights |
 | `segments.py` | change 1: diff / contradicted-cue spans → per-token weights |
 | `optimised_interface.py` | `SegmentPairData`, `segment_forward`, `SegmentTrainer`, weighted reference and post-training passes |
@@ -143,8 +192,12 @@ and `clip_pairs` in `pairs.jsonl`, `segment_*/chosen_weight_share` in the traini
 
 ## Verification status
 
-`python test_optimised_cpu.py` passes (27 checks, set `OMNI_TOKENIZER` for the real-tokenizer
+`python test_optimised_cpu.py` passes (33 checks, set `OMNI_TOKENIZER` for the real-tokenizer
 check):
+- each of the four changes can be switched on alone, and without the three new keys the output is
+  the full method as before;
+- the validation clips are the end of the round order, the score is the mean over clips, and
+  `validate` calls GRACE's two stages with its own answer count and local sampling only;
 - segment weights follow the official tokenisation, including the EOS token;
 - `segment_forward` equals the official `concatenated_forward` sums when every weight is 1, and the
   hand-computed weighted sums otherwise;

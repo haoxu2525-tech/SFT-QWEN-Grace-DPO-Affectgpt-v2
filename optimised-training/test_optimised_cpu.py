@@ -459,11 +459,172 @@ class PerTypeMethod(unittest.TestCase):
             self.assertEqual(out["d1"]["candidates"], list("wxyz"))
             self.assertEqual(len(bp.read_jsonl(d / "candidates.k.jsonl")[0]["candidates"]), 4)
 
+    def switch_round(self, d):
+        """One ovlabel clip (answers: good 0.9, bad 0.1, mid 0.8, long 0.95 with 6 labels against
+        2 in the ground truth) and one description clip (fine 0.9, poor 0.0)."""
+        bp.write_jsonl(d / "candidates.jsonl", [
+            dict(ORIGINAL, id="o1", label_type="ovlabel", candidates=["good", "bad", "mid", "long"]),
+            dict(ORIGINAL, id="d1", label_type="description", candidates=["fine", "poor"])])
+        rows = [("o1:0", 0.9, "ab"), ("o1:1", 0.1, "c"), ("o1:2", 0.8, "ab"), ("o1:3", 0.95, "abcdef"),
+                ("d1:0", 0.9, "ab"), ("d1:1", 0.0, "c")]
+        bp.write_jsonl(d / "labels.jsonl", [{"uid": u, "r_label": r, "hit": r > 0, "labels": list(l),
+                                             "gt_labels": ["a", "b"]} for u, r, l in rows])
+        bp.write_jsonl(d / "claims.jsonl", [{"uid": u, "id": u[:2], "k": int(u[-1]), "claims": []} for u, _, _ in rows])
+
+    def switch_cfg(self, d, **types):
+        cfg = dict(CFG, verify_cache=str(d / "verify.jsonl"), length_penalty="symmetric",
+                   label_count_rule="closer_to_gt", margin_weighting=False, clip_normalize=True,
+                   min_margin=0.3, max_pairs_per_clip=2, replay_max_fraction=0.0,
+                   ranking_types=[], penalty_types=[], segment_types=[], clip_normalize_types=[])
+        cfg.update(types)
+        return cfg
+
+    def test_switches_alone(self):
+        """Each of the four changes can be switched on alone, on GRACE's own pairs."""
+        with tempfile.TemporaryDirectory() as tmp:
+            d = Path(tmp)
+            self.switch_round(d)
+
+            def run(**types):
+                ranking.build(d, self.switch_cfg(d, **types), 1, 0, bp=bp, shared_weight=0.2)
+                return {r["id"]: r for r in bp.read_jsonl(d / "pairs.jsonl")}
+            base = run()                                     # all off = GRACE's setting C
+            self.assertEqual(set(base), {"o1#L", "d1#L"})
+            self.assertTrue(all(r["method"] == "grace" and r["shared_weight"] == 1.0 and r["clip_pairs"] == 1
+                                and r["pair_weight"] == 1.0 for r in base.values()))
+            self.assertEqual(base["o1#L"]["chosen"], "long")   # raw r_label: the 6-label answer scores highest
+            seg = run(segment_types=["ovlabel"])             # segment weighting alone
+            self.assertEqual({k: (r["chosen"], r["rejected"]) for k, r in seg.items()},
+                             {k: (r["chosen"], r["rejected"]) for k, r in base.items()})
+            self.assertEqual((seg["o1#L"]["shared_weight"], seg["d1#L"]["shared_weight"]), (0.2, 1.0))
+            pen = run(penalty_types=["ovlabel"])             # count penalty alone: long -> 0.95 * 2/6, not good
+            self.assertEqual(pen["o1#L"]["chosen"], "good")
+            self.assertEqual((pen["o1#L"]["chosen_n_distinct"], pen["o1#L"]["gt_n_distinct"]), (2, 2))
+            self.assertEqual(pen["d1#L"]["chosen"], base["d1#L"]["chosen"])
+            self.assertEqual(pen["o1#L"]["shared_weight"], 1.0)
+            rank = run(ranking_types=["ovlabel"])            # ranking alone: raw reward, no count rule, weight 1
+            ov = [r for r in rank.values() if r["source_id"] == "o1"]
+            self.assertEqual(len(ov), 2)
+            self.assertTrue(all(r["method"] == "ranking" and r["shared_weight"] == 1.0 and r["clip_pairs"] == 1
+                                for r in ov))
+            self.assertIn("long", {r["chosen"] for r in ov})   # not penalised
+            self.assertTrue(all(r["pair_weight"] == 1.0 for r in rank.values()))
+            self.assertEqual(rank["d1#L"]["method"], "grace")
+
+    def test_clip_normalise_alone(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            d = Path(tmp)
+            self.switch_round(d)
+            cfg = self.switch_cfg(d, ranking_types=["ovlabel"], clip_normalize_types=["ovlabel"])
+            ranking.build(d, cfg, 1, 0, bp=bp, shared_weight=0.2)
+            rows = bp.read_jsonl(d / "pairs.jsonl")
+            ov = [r for r in rows if r["source_id"] == "o1"]
+            de = [r for r in rows if r["source_id"] == "d1"]
+            self.assertEqual((len(ov), len(de)), (2, 1))
+            self.assertTrue(all(r["clip_pairs"] == 2 and r["shared_weight"] == 1.0 for r in ov))
+            self.assertAlmostEqual(de[0]["pair_weight"] / ov[0]["pair_weight"], 2.0)   # a clip counts once
+            self.assertAlmostEqual(sum(r["pair_weight"] for r in rows) / len(rows), 1.0)
+
+    def test_default_switches_follow_ranking_types(self):
+        """Without the three new keys the output is the full method, as before they existed."""
+        with tempfile.TemporaryDirectory() as tmp:
+            d = Path(tmp)
+            self.switch_round(d)
+            cfg = self.switch_cfg(d, ranking_types=["ovlabel"])
+            for key in ("penalty_types", "segment_types", "clip_normalize_types"):
+                del cfg[key]
+            summary = ranking.build(d, cfg, 1, 0, bp=bp, shared_weight=0.2)
+            self.assertEqual(summary["switches"], {k: ["ovlabel"] for k in (
+                "ranking_types", "penalty_types", "segment_types", "clip_normalize_types")})
+            rows = bp.read_jsonl(d / "pairs.jsonl")
+            ov = [r for r in rows if r["source_id"] == "o1"]
+            self.assertEqual(len(ov), 2)
+            self.assertTrue(all(r["method"] == "ranking" and r["shared_weight"] == 0.2 and r["clip_pairs"] == 2
+                                for r in ov))
+            self.assertTrue(all(r["chosen"] != "long" for r in ov))    # the penalised answer is not chosen
+
     def test_row_shared_weight(self):
         data = object.__new__(oi.SegmentPairData)
         data.shared_weight = 0.2
         self.assertEqual(data.row_shared_weight({}), 0.2)
         self.assertEqual(data.row_shared_weight({"shared_weight": 1.0}), 1.0)
+
+
+class Validation(unittest.TestCase):
+    def test_held_out_ids_are_the_end_of_the_round_order(self):
+        import random
+        import validation
+        ids = [f"c{i:03d}" for i in range(100)]
+        order = sorted(ids)
+        random.Random(0).shuffle(order)
+        held = validation.held_out_ids(reversed(ids), 0, 10, rounds=3, clips_per_round=20)
+        self.assertEqual(held, order[-10:])
+        self.assertFalse(set(held) & set(order[:60]))        # no round's clips
+        with self.assertRaises(SystemExit):
+            validation.held_out_ids(ids, 0, 10, rounds=5, clips_per_round=20)
+
+    def test_summarise(self):
+        import validation
+        cands = [{"id": "a", "label_type": "ovlabel"}, {"id": "b", "label_type": "description"}]
+        labels = [{"id": "a", "r_label": 1.0, "hit": True, "labels": ["x", "y"], "gt_labels": ["x", "y"]},
+                  {"id": "a", "r_label": 0.5, "hit": True, "labels": ["x"], "gt_labels": ["x", "y"]},
+                  {"id": "b", "r_label": 0.25, "hit": False, "labels": ["z"], "gt_labels": ["x"]}]
+        s = validation.summarise(cands, labels)
+        self.assertAlmostEqual(s["ovlabel"]["ew_f1"], 75.0)
+        self.assertAlmostEqual(s["description"]["ew_f1"], 25.0)
+        self.assertAlmostEqual(s["all"]["ew_f1"], 50.0)      # mean over clips, not over answers
+        self.assertEqual((s["all"]["clips"], s["all"]["answers"]), (2, 3))
+        self.assertAlmostEqual(s["all"]["hit_rate"], 100 * 2 / 3)
+        self.assertAlmostEqual(s["ovlabel"]["labels_per_answer"], 1.5)
+
+    def test_validate_calls_the_unchanged_stages(self):
+        import grace_interface as gi
+        import validation
+        with tempfile.TemporaryDirectory() as tmp:
+            work = Path(tmp)
+            ids = [f"c{i:02d}" for i in range(30)]
+            seen = {"calls": 0}
+
+            class FakeBase:
+                @staticmethod
+                def read_pairs(path):
+                    return [{"id": i} for i in ids]
+
+            class FakeRG:
+                @staticmethod
+                def policy_for(cfg, r):
+                    return Path(f"round{r - 1}.pth"), "sha" if r > 1 else None
+
+                @staticmethod
+                def stage_candidates(cfg, r, d):
+                    seen.update(k=cfg["k"], seed=cfg["seed"], round=r, sampling=cfg["sampling"],
+                                calls=seen["calls"] + 1)
+                    want = json.loads((d / "ids.json").read_text())
+                    bp.write_jsonl(d / "candidates.jsonl", [{"id": i, "label_type": "ovlabel",
+                                                            "candidates": ["x", "y"]} for i in want])
+
+                @staticmethod
+                def stage_labels(cfg, r, d):
+                    bp.write_jsonl(d / "labels.jsonl", [
+                        {"uid": f"{c['id']}:{k}", "id": c["id"], "r_label": 0.5, "hit": True,
+                         "labels": ["x"], "gt_labels": ["x"]}
+                        for c in bp.read_jsonl(d / "candidates.jsonl") for k in range(2)])
+
+            old = gi.base
+            gi.base = FakeBase
+            try:
+                cfg = {"paths": {"work_dir": str(work), "baseline_pairs": "p"}, "seed": 0, "rounds": 2,
+                       "clips_per_round": 10, "k": 4, "sampling": {"processes": 2, "remotes": [{"ssh": "x"}]},
+                       "validation": {"clips": 5, "k": 2, "processes": 1}}
+                out = validation.validate(cfg, 1, FakeRG)
+                validation.validate(cfg, 1, FakeRG)            # rerun: finished stages are kept
+            finally:
+                gi.base = old
+            self.assertEqual(seen, {"k": 2, "seed": 700000, "round": 2, "calls": 1,
+                                    "sampling": {"processes": 1, "remotes": []}})
+            self.assertEqual(out["checkpoint"], "round1.pth")
+            self.assertAlmostEqual(out["scores"]["all"]["ew_f1"], 50.0)
+            self.assertTrue((work / "validation" / "round1" / "validation.json").exists())
 
 
 if __name__ == "__main__":

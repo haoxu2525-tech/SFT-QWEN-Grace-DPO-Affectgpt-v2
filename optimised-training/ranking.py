@@ -175,21 +175,50 @@ GRACE_DEFAULTS = {"min_margin": 0.2, "h_min_margin": 0.3, "use_spurious": True,
                   "type_priority": ["H", "L", "S"], "max_pairs_per_clip": 2}
 
 
-def grace_pairs(original, recs, cfg, bp):
+def in_types(original, types):
+    """Is the clip's question type in the list? None = every type."""
+    return types is None or original.get("label_type") in types
+
+
+def grace_pairs(original, recs, cfg, bp, penalised=False):
     """GRACE's unchanged pairing (setting C) for one clip: typed L/H/S pairs against an
-    absolutely bad answer, GRACE's thresholds, raw r_label (no count penalty). Each row is
-    trained like setting C: every response token weighted 1, clip share 1."""
+    absolutely bad answer, GRACE's thresholds. Each row is trained like setting C unless
+    build() says otherwise: every response token weighted 1, clip share 1.
+    penalised=False: raw r_label, no count rule (GRACE exactly).
+    penalised=True (the clip's type is in pairs.penalty_types): the count-penalised r_label
+    decides good / bad answers and the reward, and label_count_rule filters the pairs."""
     gcfg = {**cfg, **GRACE_DEFAULTS, **(cfg.get("grace") or {})}
-    rows = bp.select_pairs(original, [dict(r, r_label=r.get("r_label_raw", r["r_label"])) for r in recs], gcfg)
+    use = recs if penalised else [dict(r, r_label=r.get("r_label_raw", r["r_label"])) for r in recs]
+    rows = bp.select_pairs(original, use, gcfg)
+    if penalised:
+        by_uid = {r["uid"]: r for r in recs}
+        n_gt = next((r["n_gt"] for r in recs if r.get("n_gt")), None)
+        kept = []
+        for row in rows:
+            rej = by_uid[row["rejected_uid"]]
+            if row["chosen_source"] == "gt":
+                cho = {"n_pred": n_gt, "n_gt": n_gt}
+            else:   # select_pairs chose the eligible answer with the highest reward
+                cho = next(r for r in recs if r["response"] == row["chosen"])
+            if not count_ok(cho, rej, cfg.get("label_count_rule", "none")):
+                continue
+            row.update(chosen_n_distinct=cho.get("n_pred"), rejected_n_distinct=rej.get("n_pred"),
+                       gt_n_distinct=n_gt)
+            kept.append(row)
+        rows = kept
     for row in rows:
         row.update(method="grace", shared_weight=1.0, clip_pairs=1)
     return rows
 
 
 def build(round_dir, cfg, batch_size, seed, replay_rows=(), bp=None, shared_weight=None):
-    """Round pairs, complete batches only (no anchors). Clips whose question type is in
-    cfg["ranking_types"] (default: all) get ranking pairs; the others GRACE's own pairs.
-    `shared_weight` is written into every ranking row (the trainer's default otherwise)."""
+    """Round pairs, complete batches only (no anchors). Four independent switches, each a list
+    of question types (None = all types, [] = none):
+      ranking_types         ranking pairs (the others get GRACE's own pairs);
+      penalty_types         count-penalised reward + label_count_rule   (default: ranking_types);
+      segment_types         `shared_weight` written into the pair's row  (default: ranking_types);
+      clip_normalize_types  pair weight x 1/(pairs of its clip)          (default: ranking_types).
+    With the three defaults this is the full method; with all four [] it is GRACE's setting C."""
     if bp is None:
         import build_pairs as bp
     if cfg.get("anchor_ratio", 0) not in (0, 0.0, None):
@@ -200,18 +229,28 @@ def build(round_dir, cfg, batch_size, seed, replay_rows=(), bp=None, shared_weig
     clips = bp.scored_clips(bp.read_jsonl(round_dir / "candidates.jsonl"), labels,
                             bp.read_jsonl(round_dir / "claims.jsonl"), bp.read_jsonl(cfg["verify_cache"]))
     ranking_types = cfg.get("ranking_types")
-    apply_length_penalty(clips, labels, cfg.get("length_penalty", "linear"), ranking_types)
+    penalty_types = cfg.get("penalty_types", ranking_types)
+    segment_types = cfg.get("segment_types", ranking_types)
+    clipnorm_types = cfg.get("clip_normalize_types", ranking_types)
+    apply_length_penalty(clips, labels, cfg.get("length_penalty", "linear"), penalty_types)
     pairs = []
     for clip in sorted(clips):
         original, recs = clips[clip]
-        if ranking_types is None or original.get("label_type") in ranking_types:
-            rows = rank_pairs(original, recs, cfg, bp.reward, bp.make_row)
+        penalised = in_types(original, penalty_types)
+        if in_types(original, ranking_types):
+            rows = rank_pairs(original, recs, cfg if penalised else dict(cfg, label_count_rule="none"),
+                              bp.reward, bp.make_row)
             for row in rows:
                 row["method"] = "ranking"
-                if shared_weight is not None:
-                    row["shared_weight"] = float(shared_weight)
         else:
-            rows = grace_pairs(original, recs, cfg, bp)
+            rows = grace_pairs(original, recs, cfg, bp, penalised=penalised)
+        segmented = in_types(original, segment_types)
+        for row in rows:
+            if not segmented:
+                row["shared_weight"] = 1.0          # every response token weighted alike (setting C)
+            elif shared_weight is not None:
+                row["shared_weight"] = float(shared_weight)
+            row["clip_pairs"] = len(rows) if in_types(original, clipnorm_types) else 1
         pairs.extend(rows)
     used = {p["id"] for p in pairs}
     replay = []
@@ -229,8 +268,7 @@ def build(round_dir, cfg, batch_size, seed, replay_rows=(), bp=None, shared_weig
     assign_pair_weights(allp, cfg.get("clip_normalize", True), cfg.get("margin_weighting", True))
     bp.write_jsonl(round_dir / "pairs.jsonl", allp)
     bp.write_jsonl(round_dir / "pairs.dropped.jsonl", dropped)
-    pens = [rec["length_penalty"] for o, recs in clips.values() for rec in recs
-            if ranking_types is None or o.get("label_type") in ranking_types]
+    pens = [rec["length_penalty"] for o, recs in clips.values() for rec in recs if in_types(o, penalty_types)]
     per_clip = {}
     for p in pairs:
         per_clip[p["source_id"]] = per_clip.get(p["source_id"], 0) + 1
@@ -248,6 +286,8 @@ def build(round_dir, cfg, batch_size, seed, replay_rows=(), bp=None, shared_weig
                                   "penalised_answers": sum(x < 1 for x in pens), "answers": len(pens),
                                   "mean_factor": sum(pens) / len(pens) if pens else None},
                "label_count_rule": cfg.get("label_count_rule", "none"),
+               "switches": {"ranking_types": ranking_types, "penalty_types": penalty_types,
+                            "segment_types": segment_types, "clip_normalize_types": clipnorm_types},
                "label_counts": bp.label_count_summary(pairs + replay),
                "label_counts_vs_gt": count_vs_gt(pairs)}
     (round_dir / "pairs-summary.json").write_text(json.dumps(summary, indent=2), encoding="utf-8")
