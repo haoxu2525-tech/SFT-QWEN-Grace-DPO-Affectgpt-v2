@@ -9,8 +9,9 @@
 #       (v2 CK8  + 1/(pairs of its clip) weights: clip normalisation alone changes nothing on
 #                GRACE's pairs, because no ovlabel clip has two of them)
 #   - replaces each GPU's v2_chain.sh by a v2_lane.sh queue: the running round 1 is adopted, then
-#     validation and benchmark evaluation of round 1, one new setting, reference validations
-#     (SFT epoch 30, v1 CK8 round 1, v1 C rounds 2 and 3), and last the setting's own round 2.
+#     validation and benchmark evaluation of round 1 (GPU 0 also validates SFT epoch 30 =
+#     round 0, the reference), one new setting, and last the setting's own round 2. Only v2
+#     settings are run (user decision): no v1 export is validated.
 # The training processes are not touched: only the waiting chain shells are replaced.
 set -e
 S=/workspace/grace-ops/sched-v2
@@ -48,12 +49,11 @@ plan() { [ -f $S/lane$1.plan ] && { echo "lane$1.plan exists"; exit 1; }; cat > 
 plan 0 <<EOF
 adopt C 1
 validate C 1
+validate C 0
 eval C 1
 round CK8-R 1 $SRC
 validate CK8-R 1
 eval CK8-R 1
-validate v1:CK8 0
-validate v1:C 2
 round C 2
 validate C 2
 eval C 2
@@ -65,7 +65,6 @@ eval CK8 1
 round CK8-RP 1 $SRC
 validate CK8-RP 1
 eval CK8-RP 1
-validate v1:C 3
 round CK8 2
 validate CK8 2
 eval CK8 2
@@ -74,7 +73,6 @@ plan 2 <<EOF
 adopt CK12 1
 validate CK12 1
 eval CK12 1
-validate v1:CK8 1
 round CK8-RPS 1 $SRC
 validate CK8-RPS 1
 eval CK8-RPS 1

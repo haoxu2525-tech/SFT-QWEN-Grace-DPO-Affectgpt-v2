@@ -1,6 +1,6 @@
 #!/bin/sh
 # Operations script on the pod: state of the v2 runs. Per setting and round: finished stages,
-# held-out validation wheel F1 (all / ovlabel / description clips), benchmark units and score.
+# held-out validation wheel F1 (all / ovlabel / description clips), benchmark units and score; the validation score of SFT epoch 30 (round 0).
 S=/workspace/grace-ops/sched-v2
 PY=/workspace/grace-env/bin/python
 val() {   # validation.json -> "all 61.23 ovlabel 63.10 description 59.40"
@@ -17,9 +17,8 @@ for W in /workspace/grace-work/v2/*/; do
     echo "v2-$X r$r stages: ${st:-none}| validation $(val $W/validation/round$r/validation.json) | eval units $u/5 | score $sc"
   done
 done
-echo "reference validations (GRACE v1 exports; round 0 = SFT epoch 30):"
-for f in /workspace/grace-work/abl/*/validation/round*/validation.json; do
-  [ -s "$f" ] && echo "   v1 $(echo $f | awk -F/ '{print $5, $7}'): $(val $f)"
+for f in /workspace/grace-work/v2/*/validation/round0/validation.json; do
+  [ -s "$f" ] && echo "SFT epoch 30 validation (round 0): $(val $f)"
 done
 for g in 0 1 2; do
   echo "gpu$g: $(tail -1 $S/lane$g.log 2>/dev/null | cut -c1-200)"
