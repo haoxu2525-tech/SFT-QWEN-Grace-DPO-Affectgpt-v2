@@ -62,7 +62,7 @@ benchmark score. The penalty only acts above the ground-truth count, but check t
 the evaluated answers after round 1. `pairs-summary.json` reports these counts every round.
 
 **Cost:** about 2.5x C's pairs per round, so training takes about 2.5x as long (C: ~2 h per round on one
-A40, so about 6 h). Sampling, labels, claims and verification are unchanged.
+A40, so about 5 h). Sampling, labels, claims and verification are unchanged.
 
 ## Files
 
