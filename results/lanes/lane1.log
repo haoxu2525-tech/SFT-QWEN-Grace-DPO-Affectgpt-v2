@@ -12,3 +12,7 @@
 2026-11-26T18:01:33Z gpu1 waiting for the benchmark score of CK8-P round 1
 2026-11-26T23:41:34Z gpu1 scored CK8-P round 1: 75.37
 2026-11-26T23:41:54Z gpu1 start CK8 round 2
+2026-11-27T11:44:13Z gpu1 done CK8 round 2: {"clips":2000,"pairs":2496,"by_type":{"L":876,"H":401,"S":10,"R":1209},"by_question_type":{"ovlabel":1821,"description":675},"by_method":{"ranking":1821,"grace":675},"dropped_incomplete_batch":2,"repl
+2026-11-27T11:44:13Z gpu1 start validation of CK8 round 2
+2026-11-27T13:34:16Z gpu1 validated CK8 round 2: all 65.74 (+-1.04, 500 clips) ovlabel 69.32 (+-1.39, 253 clips) description 62.08 (+-1.51, 247 clips)
+2026-11-27T13:34:16Z gpu1 waiting for the benchmark score of CK8 round 2

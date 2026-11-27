@@ -1,6 +1,6 @@
 # GRACE v2 results from the pod
 
-Written by `ops/v2_results_report.py` at 2026-11-27T11:04:01Z. Do not edit by hand.
+Written by `ops/v2_results_report.py` at 2026-11-27T15:12:56Z. Do not edit by hand.
 
 ## Validation (500 held-out clips, 4 answers per clip, wheel F1 x100, mean ± SEM)
 
@@ -8,8 +8,10 @@ Written by `ops/v2_results_report.py` at 2026-11-27T11:04:01Z. Do not edit by ha
 |---|---|---|---|---|---|---|
 | SFT epoch 30 | 0 | 64.56 ± 1.00 | 68.10 ± 1.37 | 60.94 ± 1.41 | 3.23 |  |
 | C | 1 | 65.47 ± 1.00 | 68.69 ± 1.34 | 62.17 ± 1.47 | 3.50 | baea7f58c3b4 |
+| C | 2 | 66.61 ± 1.00 | 69.79 ± 1.31 | 63.34 ± 1.48 | 3.33 | 5971da67522d |
 | CK12 | 1 | 68.45 ± 0.98 | 72.44 ± 1.28 | 64.37 ± 1.45 | 3.56 | c43a068fa87a |
 | CK8 | 1 | 67.37 ± 1.00 | 71.70 ± 1.29 | 62.92 ± 1.49 | 3.41 | ce496fd5a857 |
+| CK8 | 2 | 65.74 ± 1.04 | 69.32 ± 1.39 | 62.08 ± 1.51 | 3.52 | 5932061ba83d |
 | CK8-N | 1 | 66.24 ± 0.99 | 69.14 ± 1.25 | 63.26 ± 1.52 | 3.56 | ff543de656e0 |
 | CK8-P | 1 | 65.93 ± 0.99 | 69.36 ± 1.32 | 62.41 ± 1.45 | 3.59 | 766030108709 |
 | CK8-R | 1 | 66.69 ± 1.03 | 71.98 ± 1.28 | 61.26 ± 1.55 | 3.43 | cf6cefd9a843 |
