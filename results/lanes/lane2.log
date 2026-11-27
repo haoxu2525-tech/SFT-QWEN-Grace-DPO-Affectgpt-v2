@@ -13,3 +13,7 @@
 2026-11-27T00:02:22Z gpu2 scored CK8-S round 1: 76.36
 2026-11-27T00:02:48Z gpu2 CK8-N: reused round-1 answers from /workspace/grace-work/abl/CK8/round1
 2026-11-27T00:02:48Z gpu2 start CK8-N round 1
+2026-11-27T01:27:58Z gpu2 done CK8-N round 1: {"clips":2000,"pairs":1208,"by_type":{"L":643,"H":562,"S":3,"R":0},"by_question_type":{"ovlabel":273,"description":935},"by_method":{"ranking":0,"grace":1208},"dropped_incomplete_batch":1,"replayed":0
+2026-11-27T01:27:58Z gpu2 start validation of CK8-N round 1
+2026-11-27T03:18:17Z gpu2 validated CK8-N round 1: all 66.24 (+-0.99, 500 clips) ovlabel 69.14 (+-1.25, 253 clips) description 63.26 (+-1.52, 247 clips)
+2026-11-27T03:18:17Z gpu2 waiting for the benchmark score of CK8-N round 1

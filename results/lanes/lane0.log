@@ -12,3 +12,5 @@
 2026-11-26T18:39:47Z gpu0 start validation of CK8-R round 1
 2026-11-26T20:31:21Z gpu0 validated CK8-R round 1: all 66.69 (+-1.03, 500 clips) ovlabel 71.98 (+-1.28, 253 clips) description 61.26 (+-1.55, 247 clips)
 2026-11-26T20:31:21Z gpu0 waiting for the benchmark score of CK8-R round 1
+2026-11-27T02:08:22Z gpu0 scored CK8-R round 1: 75.75
+2026-11-27T02:08:42Z gpu0 start C round 2
