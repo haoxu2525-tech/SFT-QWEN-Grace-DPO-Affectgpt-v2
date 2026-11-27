@@ -1,0 +1,36 @@
+{
+  "round": 1,
+  "checkpoint": "/workspace/grace-work/v2/CK8-S/round1/export/checkpoint_000001_dpo_final.pth",
+  "sha256": "c7131ef9add3562aef4d662f9ee183068269a14454ac3c3f102d4da377ab0bfc",
+  "clips": 500,
+  "k": 4,
+  "scores": {
+    "all": {
+      "clips": 500,
+      "answers": 2000,
+      "ew_f1": 67.40026984126973,
+      "sem": 0.9722804957334191,
+      "hit_rate": 93.5,
+      "labels_per_answer": 3.81,
+      "gt_labels_per_clip": 3.644
+    },
+    "ovlabel": {
+      "clips": 253,
+      "answers": 1012,
+      "ew_f1": 70.12389422172033,
+      "sem": 1.2548376568012458,
+      "hit_rate": 96.44268774703558,
+      "labels_per_answer": 4.280632411067193,
+      "gt_labels_per_clip": 3.656126482213439
+    },
+    "description": {
+      "clips": 247,
+      "answers": 988,
+      "ew_f1": 64.61048454469507,
+      "sem": 1.4720618640930634,
+      "hit_rate": 90.48582995951416,
+      "labels_per_answer": 3.327935222672065,
+      "gt_labels_per_clip": 3.6315789473684212
+    }
+  }
+}

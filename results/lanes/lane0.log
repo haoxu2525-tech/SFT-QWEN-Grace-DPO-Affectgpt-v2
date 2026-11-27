@@ -5,3 +5,10 @@
 2026-11-26T08:37:43Z gpu0 start validation of C round 0
 2026-11-26T10:27:41Z gpu0 validated C round 0: all 64.56 (+-1.00, 500 clips) ovlabel 68.10 (+-1.37, 253 clips) description 60.94 (+-1.41, 247 clips)
 2026-11-26T10:27:41Z gpu0 waiting for the benchmark score of C round 1
+2026-11-26T16:06:42Z gpu0 scored C round 1: 73.84
+2026-11-26T16:07:08Z gpu0 CK8-R: reused round-1 answers from /workspace/grace-work/abl/CK8/round1
+2026-11-26T16:07:08Z gpu0 start CK8-R round 1
+2026-11-26T18:39:47Z gpu0 done CK8-R round 1: {"clips":2000,"pairs":2224,"by_type":{"L":903,"H":562,"S":3,"R":756},"by_question_type":{"ovlabel":1289,"description":935},"by_method":{"ranking":1289,"grace":935},"dropped_incomplete_batch":1,"replay
+2026-11-26T18:39:47Z gpu0 start validation of CK8-R round 1
+2026-11-26T20:31:21Z gpu0 validated CK8-R round 1: all 66.69 (+-1.03, 500 clips) ovlabel 71.98 (+-1.28, 253 clips) description 61.26 (+-1.55, 247 clips)
+2026-11-26T20:31:21Z gpu0 waiting for the benchmark score of CK8-R round 1

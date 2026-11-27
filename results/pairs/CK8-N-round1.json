@@ -1,0 +1,91 @@
+{
+  "clips": 2000,
+  "pairs": 1208,
+  "by_type": {
+    "L": 643,
+    "H": 562,
+    "S": 3,
+    "R": 0
+  },
+  "by_question_type": {
+    "ovlabel": 273,
+    "description": 935
+  },
+  "by_method": {
+    "ranking": 0,
+    "grace": 1208
+  },
+  "dropped_incomplete_batch": 1,
+  "replayed": 0,
+  "clips_with_pairs": 1054,
+  "ovlabel_clips_with_pairs": 274,
+  "ovlabel_clips": 984,
+  "chosen_from_policy": 999,
+  "chosen_from_gt": 210,
+  "length_penalty": {
+    "mode": "symmetric",
+    "penalised_answers": 0,
+    "answers": 0,
+    "mean_factor": null
+  },
+  "label_count_rule": "closer_to_gt",
+  "switches": {
+    "ranking_types": [],
+    "penalty_types": [],
+    "segment_types": [],
+    "clip_normalize_types": [
+      "ovlabel"
+    ]
+  },
+  "label_counts": {
+    "all": {
+      "pairs": 1209,
+      "chosen_mean": 3.2663358147229116,
+      "rejected_mean": 2.870967741935484,
+      "chosen_fewer": 0.30603804797353185,
+      "equal": 0.2456575682382134,
+      "chosen_more": 0.44830438378825477
+    },
+    "label_type:description": {
+      "pairs": 935,
+      "chosen_mean": 3.2128342245989305,
+      "rejected_mean": 2.92620320855615,
+      "chosen_fewer": 0.31336898395721924,
+      "equal": 0.2609625668449198,
+      "chosen_more": 0.42566844919786095
+    },
+    "label_type:ovlabel": {
+      "pairs": 274,
+      "chosen_mean": 3.448905109489051,
+      "rejected_mean": 2.6824817518248176,
+      "chosen_fewer": 0.28102189781021897,
+      "equal": 0.19343065693430658,
+      "chosen_more": 0.5255474452554745
+    },
+    "type:H": {
+      "pairs": 562,
+      "chosen_mean": 3.202846975088968,
+      "rejected_mean": 3.209964412811388,
+      "chosen_fewer": 0.36298932384341637,
+      "equal": 0.2793594306049822,
+      "chosen_more": 0.35765124555160144
+    },
+    "type:L": {
+      "pairs": 644,
+      "chosen_mean": 3.3152173913043477,
+      "rejected_mean": 2.577639751552795,
+      "chosen_fewer": 0.2577639751552795,
+      "equal": 0.21739130434782608,
+      "chosen_more": 0.5248447204968945
+    },
+    "type:S": {
+      "pairs": 3,
+      "chosen_mean": 4.666666666666667,
+      "rejected_mean": 2.3333333333333335,
+      "chosen_fewer": 0.0,
+      "equal": 0.0,
+      "chosen_more": 1.0
+    }
+  },
+  "label_counts_vs_gt": {}
+}

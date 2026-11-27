@@ -1,0 +1,124 @@
+{
+  "clips": 2000,
+  "pairs": 2224,
+  "by_type": {
+    "L": 903,
+    "H": 562,
+    "S": 3,
+    "R": 756
+  },
+  "by_question_type": {
+    "ovlabel": 1289,
+    "description": 935
+  },
+  "by_method": {
+    "ranking": 1289,
+    "grace": 935
+  },
+  "dropped_incomplete_batch": 1,
+  "replayed": 0,
+  "clips_with_pairs": 1442,
+  "ovlabel_clips_with_pairs": 662,
+  "ovlabel_clips": 984,
+  "chosen_from_policy": 1988,
+  "chosen_from_gt": 237,
+  "length_penalty": {
+    "mode": "symmetric",
+    "penalised_answers": 0,
+    "answers": 0,
+    "mean_factor": null
+  },
+  "label_count_rule": "closer_to_gt",
+  "switches": {
+    "ranking_types": [
+      "ovlabel"
+    ],
+    "penalty_types": [],
+    "segment_types": [],
+    "clip_normalize_types": []
+  },
+  "label_counts": {
+    "all": {
+      "pairs": 2225,
+      "chosen_mean": 3.390561797752809,
+      "rejected_mean": 3.1402247191011234,
+      "chosen_fewer": 0.33662921348314606,
+      "equal": 0.22696629213483147,
+      "chosen_more": 0.43640449438202245
+    },
+    "label_type:description": {
+      "pairs": 935,
+      "chosen_mean": 3.2128342245989305,
+      "rejected_mean": 2.92620320855615,
+      "chosen_fewer": 0.31336898395721924,
+      "equal": 0.2609625668449198,
+      "chosen_more": 0.42566844919786095
+    },
+    "label_type:ovlabel": {
+      "pairs": 1290,
+      "chosen_mean": 3.5193798449612403,
+      "rejected_mean": 3.2953488372093025,
+      "chosen_fewer": 0.35348837209302325,
+      "equal": 0.20232558139534884,
+      "chosen_more": 0.4441860465116279
+    },
+    "type:H": {
+      "pairs": 562,
+      "chosen_mean": 3.202846975088968,
+      "rejected_mean": 3.209964412811388,
+      "chosen_fewer": 0.36298932384341637,
+      "equal": 0.2793594306049822,
+      "chosen_more": 0.35765124555160144
+    },
+    "type:L": {
+      "pairs": 903,
+      "chosen_mean": 3.336655592469546,
+      "rejected_mean": 2.5957918050941307,
+      "chosen_fewer": 0.26245847176079734,
+      "equal": 0.20930232558139536,
+      "chosen_more": 0.5282392026578073
+    },
+    "type:R": {
+      "pairs": 757,
+      "chosen_mean": 3.5891677675033025,
+      "rejected_mean": 3.7410832232496696,
+      "chosen_fewer": 0.40686922060766184,
+      "equal": 0.21003963011889035,
+      "chosen_more": 0.38309114927344784
+    },
+    "type:S": {
+      "pairs": 3,
+      "chosen_mean": 4.666666666666667,
+      "rejected_mean": 2.3333333333333335,
+      "chosen_fewer": 0.0,
+      "equal": 0.0,
+      "chosen_more": 1.0
+    }
+  },
+  "label_counts_vs_gt": {
+    "all": {
+      "pairs": 1216,
+      "chosen_mean": 3.583059210526316,
+      "rejected_mean": 3.4383223684210527,
+      "gt_mean": 3.716282894736842,
+      "chosen_fewer": 0.3569078947368421,
+      "chosen_more": 0.4284539473684211,
+      "chosen_below_gt": 0.3503289473684211,
+      "rejected_below_gt": 0.4720394736842105,
+      "chosen_above_gt": 0.30098684210526316,
+      "rejected_above_gt": 0.32976973684210525
+    },
+    "ovlabel": {
+      "pairs": 1216,
+      "chosen_mean": 3.583059210526316,
+      "rejected_mean": 3.4383223684210527,
+      "gt_mean": 3.716282894736842,
+      "chosen_fewer": 0.3569078947368421,
+      "chosen_more": 0.4284539473684211,
+      "chosen_below_gt": 0.3503289473684211,
+      "rejected_below_gt": 0.4720394736842105,
+      "chosen_above_gt": 0.30098684210526316,
+      "rejected_above_gt": 0.32976973684210525
+    }
+  }
+}

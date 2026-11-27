@@ -3,3 +3,13 @@
 2026-11-26T07:18:04Z gpu2 start validation of CK12 round 1
 2026-11-26T09:09:24Z gpu2 validated CK12 round 1: all 68.45 (+-0.98, 500 clips) ovlabel 72.44 (+-1.28, 253 clips) description 64.37 (+-1.45, 247 clips)
 2026-11-26T09:09:24Z gpu2 waiting for the benchmark score of CK12 round 1
+2026-11-26T14:49:25Z gpu2 scored CK12 round 1: 76.43
+2026-11-26T14:49:51Z gpu2 CK8-S: reused round-1 answers from /workspace/grace-work/abl/CK8/round1
+2026-11-26T14:49:51Z gpu2 start CK8-S round 1
+2026-11-26T16:16:01Z gpu2 done CK8-S round 1: {"clips":2000,"pairs":1208,"by_type":{"L":643,"H":562,"S":3,"R":0},"by_question_type":{"ovlabel":273,"description":935},"by_method":{"ranking":0,"grace":1208},"dropped_incomplete_batch":1,"replayed":0
+2026-11-26T16:16:01Z gpu2 start validation of CK8-S round 1
+2026-11-26T18:08:21Z gpu2 validated CK8-S round 1: all 67.40 (+-0.97, 500 clips) ovlabel 70.12 (+-1.25, 253 clips) description 64.61 (+-1.47, 247 clips)
+2026-11-26T18:08:21Z gpu2 waiting for the benchmark score of CK8-S round 1
+2026-11-27T00:02:22Z gpu2 scored CK8-S round 1: 76.36
+2026-11-27T00:02:48Z gpu2 CK8-N: reused round-1 answers from /workspace/grace-work/abl/CK8/round1
+2026-11-27T00:02:48Z gpu2 start CK8-N round 1
