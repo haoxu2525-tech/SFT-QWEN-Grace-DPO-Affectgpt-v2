@@ -17,3 +17,5 @@
 2026-11-27T01:27:58Z gpu2 start validation of CK8-N round 1
 2026-11-27T03:18:17Z gpu2 validated CK8-N round 1: all 66.24 (+-0.99, 500 clips) ovlabel 69.14 (+-1.25, 253 clips) description 63.26 (+-1.52, 247 clips)
 2026-11-27T03:18:17Z gpu2 waiting for the benchmark score of CK8-N round 1
+2026-11-27T08:42:18Z gpu2 scored CK8-N round 1: 75.39
+2026-11-27T08:42:38Z gpu2 start CK12 round 2

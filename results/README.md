@@ -1,6 +1,6 @@
 # GRACE v2 results from the pod
 
-Written by `ops/v2_results_report.py` at 2026-11-27T05:26:16Z. Do not edit by hand.
+Written by `ops/v2_results_report.py` at 2026-11-27T11:04:01Z. Do not edit by hand.
 
 ## Validation (500 held-out clips, 4 answers per clip, wheel F1 x100, mean ± SEM)
 
@@ -25,14 +25,17 @@ Written by `ops/v2_results_report.py` at 2026-11-27T05:26:16Z. Do not edit by ha
 | v2-CK8-P-r1 | 77.56 | 81.08 | 59.86 | 62.82 | 82.53 | 79.75 | 87.07 | 84.71 | 62.91 | 75.37 | 766030108709 | 2026-11-26T23:41:22Z |
 | v2-CK8-S-r1 | 81.11 | 82.52 | 63.28 | 64.90 | 82.69 | 79.22 | 85.74 | 84.74 | 63.00 | 76.36 | c7131ef9add3 | 2026-11-27T00:02:13Z |
 | v2-CK8-R-r1 | 78.98 | 82.60 | 59.02 | 64.46 | 81.95 | 79.97 | 84.20 | 87.05 | 63.54 | 75.75 | cf6cefd9a843 | 2026-11-27T02:08:06Z |
+| v2-CK8-N-r1 | 79.20 | 80.98 | 61.13 | 61.89 | 85.11 | 78.61 | 84.91 | 84.48 | 62.23 | 75.39 | ff543de656e0 | 2026-11-27T08:41:31Z |
 
 ## Training pairs
 
 | setting | round | pairs | ovlabel | description | ranking pairs |
 |---|---|---|---|---|---|
 | C | 1 | 2352 | 1417 | 935 | 1417 |
+| C | 2 | 2120 | 1434 | 686 | 1434 |
 | CK12 | 1 | 2848 | 1914 | 934 | 1914 |
 | CK8 | 1 | 2752 | 1817 | 935 | 1817 |
+| CK8 | 2 | 2496 | 1821 | 675 | 1821 |
 | CK8-N | 1 | 1208 | 273 | 935 | 0 |
 | CK8-P | 1 | 1352 | 419 | 933 | 0 |
 | CK8-R | 1 | 2224 | 1289 | 935 | 1289 |
