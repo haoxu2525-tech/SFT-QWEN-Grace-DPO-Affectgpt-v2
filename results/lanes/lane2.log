@@ -23,3 +23,5 @@
 2026-11-27T22:00:13Z gpu2 start validation of CK12 round 2
 2026-11-27T23:45:29Z gpu2 validated CK12 round 2: all 68.23 (+-1.03, 500 clips) ovlabel 71.61 (+-1.35, 253 clips) description 64.77 (+-1.53, 247 clips)
 2026-11-27T23:45:29Z gpu2 waiting for the benchmark score of CK12 round 2
+2026-11-28T04:46:30Z gpu2 scored CK12 round 2: 73.84
+2026-11-28T04:46:30Z gpu2 lane finished: every line of lane2.plan was handled

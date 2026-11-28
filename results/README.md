@@ -1,6 +1,6 @@
 # GRACE v2 results from the pod
 
-Written by `ops/v2_results_report.py` at 2026-11-28T02:00:40Z. Do not edit by hand.
+Written by `ops/v2_results_report.py` at 2026-11-28T06:40:12Z. Do not edit by hand.
 
 ## Validation (500 held-out clips, 4 answers per clip, wheel F1 x100, mean ± SEM)
 
@@ -31,6 +31,7 @@ Written by `ops/v2_results_report.py` at 2026-11-28T02:00:40Z. Do not edit by ha
 | v2-CK8-N-r1 | 79.20 | 80.98 | 61.13 | 61.89 | 85.11 | 78.61 | 84.91 | 84.48 | 62.23 | 75.39 | ff543de656e0 | 2026-11-27T08:41:31Z |
 | v2-CK8-r2 | 77.86 | 82.71 | 58.74 | 61.49 | 83.18 | 73.74 | 86.09 | 83.34 | 63.09 | 74.47 | 5932061ba83d | 2026-11-27T18:46:23Z |
 | v2-C-r2 | 77.84 | 80.17 | 57.54 | 60.40 | 79.13 | 76.75 | 87.63 | 84.72 | 61.59 | 73.97 | 5971da67522d | 2026-11-27T19:41:42Z |
+| v2-CK12-r2 | 75.77 | 79.74 | 55.74 | 56.76 | 83.73 | 77.14 | 86.51 | 85.02 | 64.18 | 73.84 | f9e5c9f623e7 | 2026-11-28T04:45:51Z |
 
 ## Training pairs
 
