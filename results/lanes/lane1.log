@@ -16,3 +16,5 @@
 2026-11-27T11:44:13Z gpu1 start validation of CK8 round 2
 2026-11-27T13:34:16Z gpu1 validated CK8 round 2: all 65.74 (+-1.04, 500 clips) ovlabel 69.32 (+-1.39, 253 clips) description 62.08 (+-1.51, 247 clips)
 2026-11-27T13:34:16Z gpu1 waiting for the benchmark score of CK8 round 2
+2026-11-27T18:47:17Z gpu1 scored CK8 round 2: 74.47
+2026-11-27T18:47:17Z gpu1 lane finished: every line of lane1.plan was handled

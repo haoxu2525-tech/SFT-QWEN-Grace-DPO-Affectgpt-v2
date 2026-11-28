@@ -18,3 +18,5 @@
 2026-11-27T12:40:46Z gpu0 start validation of C round 2
 2026-11-27T14:28:44Z gpu0 validated C round 2: all 66.61 (+-1.00, 500 clips) ovlabel 69.79 (+-1.31, 253 clips) description 63.34 (+-1.48, 247 clips)
 2026-11-27T14:28:44Z gpu0 waiting for the benchmark score of C round 2
+2026-11-27T19:41:45Z gpu0 scored C round 2: 73.97
+2026-11-27T19:41:45Z gpu0 lane finished: every line of lane0.plan was handled

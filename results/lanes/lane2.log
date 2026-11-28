@@ -19,3 +19,7 @@
 2026-11-27T03:18:17Z gpu2 waiting for the benchmark score of CK8-N round 1
 2026-11-27T08:42:18Z gpu2 scored CK8-N round 1: 75.39
 2026-11-27T08:42:38Z gpu2 start CK12 round 2
+2026-11-27T22:00:13Z gpu2 done CK12 round 2: {"clips":2000,"pairs":2560,"by_type":{"L":841,"H":419,"S":12,"R":1288},"by_question_type":{"ovlabel":1879,"description":681},"by_method":{"ranking":1879,"grace":681},"dropped_incomplete_batch":7,"repl
+2026-11-27T22:00:13Z gpu2 start validation of CK12 round 2
+2026-11-27T23:45:29Z gpu2 validated CK12 round 2: all 68.23 (+-1.03, 500 clips) ovlabel 71.61 (+-1.35, 253 clips) description 64.77 (+-1.53, 247 clips)
+2026-11-27T23:45:29Z gpu2 waiting for the benchmark score of CK12 round 2
